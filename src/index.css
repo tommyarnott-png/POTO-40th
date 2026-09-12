@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --radius: 0;
+  --background: #00060f;
+  --foreground: #ffffff;
+  --card: #020a15;
+  --card-foreground: #ffffff;
+  --primary: #a5bed3;
+  --primary-foreground: #00060f;
+  --secondary: #0b1726;
+  --secondary-foreground: #ffffff;
+  --muted: #0b1726;
+  --muted-foreground: #8ca6b7;
+  --accent: #a5bed3;
+  --accent-foreground: #00060f;
+  --border: rgba(165, 190, 211, 0.24);
+  --input: rgba(165, 190, 211, 0.16);
+  --ring: #a5bed3;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    background: #00060f;
+    color: #fff;
+    font-family: "Jost", "Trebuchet MS", sans-serif;
+    font-weight: 400;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+
+  button:not(:disabled),
+  a[href],
+  input[type="range"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+.font-detail {
+  font-family: "Montserrat", sans-serif;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(165, 190, 211, 0.25);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(165, 190, 211, 0.25);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
+  border-radius: 9999px;
+  background: #edf5f9;
+  border: 1px solid #a5bed3;
+  box-shadow: 0 0 0 3px rgba(165, 190, 211, 0.14);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: #edf5f9;
+  border: 1px solid #a5bed3;
+  box-shadow: 0 0 0 3px rgba(165, 190, 211, 0.14);
+}
+
+.ab-fader::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 0;
+  background: linear-gradient(90deg, #6a99ab, #a5bed3);
+}
+
+.ab-fader::-moz-range-track {
+  height: 5px;
+  border-radius: 0;
+  background: linear-gradient(90deg, #6a99ab, #a5bed3);
+}
+
+.ab-fader::-webkit-slider-thumb {
+  width: 18px;
+  height: 24px;
+  margin-top: -10px;
+  border-radius: 0;
+  border: 1px solid #dceaf2;
+  background: #00060f;
+  box-shadow: 0 0 0 2px rgba(165, 190, 211, 0.2);
+}
+
+.ab-fader::-moz-range-thumb {
+  width: 16px;
+  height: 22px;
+  border-radius: 0;
+  border: 1px solid #dceaf2;
+  background: #00060f;
+  box-shadow: 0 0 0 2px rgba(165, 190, 211, 0.2);
+}
+
+.download-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(165, 190, 211, 0.3);
+  padding: 0.55rem 0.75rem;
+  color: #a5bed3;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+.download-link:hover {
+  border-color: #a5bed3;
+  background: rgba(165, 190, 211, 0.08);
+  color: #fff;
+}
+
+.stem-button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid rgba(165, 190, 211, 0.25);
+  color: #7798ac;
+  font-size: 10px;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+
+.stem-button:hover {
+  border-color: #a5bed3;
+  color: #fff;
+}
+
+.stem-button.active {
+  border-color: #a5bed3;
+  background: #a5bed3;
+  color: #00060f;
+}
+
+@media (max-width: 680px) {
+  .download-link {
+    font-size: 9px;
+    padding: 0.5rem 0.6rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

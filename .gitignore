@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
+
+# Full-resolution source audio is never committed: the grouped-stem archive
+# alone is 220MB, past GitHub's 100MB per-file limit. See docs/ASSETS.md.
+*.wav
+*.aiff
+*.flac
+public/audio/source/
+GroupedStems-ForWebsite.zip
+
+# Official brand artwork is not redistributed here. See docs/ASSETS.md.
+public/images/*
+!public/images/.gitkeep
