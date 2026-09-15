@@ -2,6 +2,47 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * The official site's faces, self-hosted from public/fonts (SIL Open Font
+ * License, text alongside): Jost for headings, labels and controls, Montserrat
+ * for running text. Latin and Latin Extended subsets, one variable file each.
+ */
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/jost-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: url("/fonts/jost-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/montserrat-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/montserrat-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -57,7 +98,7 @@
     min-width: 320px;
     background: #00060f;
     color: #fff;
-    font-family: "Jost", "Trebuchet MS", sans-serif;
+    font-family: "Jost", sans-serif;
     font-weight: 400;
   }
 
@@ -77,21 +118,25 @@
   font-family: "Montserrat", sans-serif;
 }
 
+/*
+ * The level sliders: a 44px-tall hit area around a thin track, and a thumb
+ * large enough to find without looking twice.
+ */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  height: 14px;
+  height: 44px;
   background: transparent;
 }
 
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 2px;
+  height: 3px;
   border-radius: 99px;
   background: rgba(165, 190, 211, 0.25);
 }
 
 input[type="range"]::-moz-range-track {
-  height: 2px;
+  height: 3px;
   border-radius: 99px;
   background: rgba(165, 190, 211, 0.25);
 }
@@ -99,76 +144,27 @@ input[type="range"]::-moz-range-track {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 10px;
-  height: 10px;
-  margin-top: -4px;
+  width: 18px;
+  height: 18px;
+  margin-top: -7.5px;
   border-radius: 9999px;
   background: #edf5f9;
   border: 1px solid #a5bed3;
-  box-shadow: 0 0 0 3px rgba(165, 190, 211, 0.14);
+  box-shadow: 0 0 0 4px rgba(165, 190, 211, 0.14);
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 9px;
-  height: 9px;
+  width: 16px;
+  height: 16px;
   border-radius: 9999px;
   background: #edf5f9;
   border: 1px solid #a5bed3;
-  box-shadow: 0 0 0 3px rgba(165, 190, 211, 0.14);
+  box-shadow: 0 0 0 4px rgba(165, 190, 211, 0.14);
 }
 
-.ab-fader::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 0;
-  background: linear-gradient(90deg, #6a99ab, #a5bed3);
-}
-
-.ab-fader::-moz-range-track {
-  height: 5px;
-  border-radius: 0;
-  background: linear-gradient(90deg, #6a99ab, #a5bed3);
-}
-
-.ab-fader::-webkit-slider-thumb {
-  width: 18px;
-  height: 24px;
-  margin-top: -10px;
-  border-radius: 0;
-  border: 1px solid #dceaf2;
-  background: #00060f;
-  box-shadow: 0 0 0 2px rgba(165, 190, 211, 0.2);
-}
-
-.ab-fader::-moz-range-thumb {
-  width: 16px;
-  height: 22px;
-  border-radius: 0;
-  border: 1px solid #dceaf2;
-  background: #00060f;
-  box-shadow: 0 0 0 2px rgba(165, 190, 211, 0.2);
-}
-
-.download-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid rgba(165, 190, 211, 0.3);
-  padding: 0.55rem 0.75rem;
-  color: #a5bed3;
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
-}
-
-.download-link:hover {
-  border-color: #a5bed3;
-  background: rgba(165, 190, 211, 0.08);
-  color: #fff;
-}
-
+/* Drawn at 32px; the ::before, measured from inside the 1px border, extends the hit area to 44px. */
 .stem-button {
+  position: relative;
   display: grid;
   width: 2rem;
   height: 2rem;
@@ -177,6 +173,12 @@ input[type="range"]::-moz-range-thumb {
   color: #7798ac;
   font-size: 10px;
   transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+
+.stem-button::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
 }
 
 .stem-button:hover {
@@ -188,13 +190,6 @@ input[type="range"]::-moz-range-thumb {
   border-color: #a5bed3;
   background: #a5bed3;
   color: #00060f;
-}
-
-@media (max-width: 680px) {
-  .download-link {
-    font-size: 9px;
-    padding: 0.5rem 0.6rem;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

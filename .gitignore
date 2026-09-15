@@ -14,6 +14,13 @@ dist/
 public/audio/source/
 GroupedStems-ForWebsite.zip
 
-# Official brand artwork is not redistributed here. See docs/ASSETS.md.
+# The official production logo is not redistributed here; the A/B masks and the
+# page background are. See docs/ASSETS.md.
 public/images/*
 !public/images/.gitkeep
+!public/images/mask-original.png
+!public/images/mask-remaster.png
+!public/images/smoke-bg.jpg
+
+# Wrangler's local state.
+.wrangler/

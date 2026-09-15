@@ -1,3 +1,11 @@
+"""
+Cross-correlates the 1986 master against the 2026 remaster at fixed points.
+
+    ffmpeg -i OLD_MASTER.wav -ac 1 -ar 8000 -c:a pcm_s16le old-8k.wav
+    ffmpeg -i NEW_MASTER.wav -ac 1 -ar 8000 -c:a pcm_s16le new-8k.wav
+    python3 tools/measure_alignment.py old-8k.wav new-8k.wav
+"""
+import argparse
 import wave
 import numpy as np
 
@@ -47,8 +55,13 @@ def best_offset(old: np.ndarray, new: np.ndarray, center_seconds: float, window_
     return lag_samples / SAMPLE_RATE, old_time, score
 
 
-old = read_wav("/home/ubuntu/phantom-audio-analysis/old-8k.wav")
-new = read_wav("/home/ubuntu/phantom-audio-analysis/new-8k.wav")
+parser = argparse.ArgumentParser(description="Cross-correlate the two masters at fixed points.")
+parser.add_argument("old", help="1986 master decoded to 8kHz 16-bit PCM WAV")
+parser.add_argument("new", help="2026 remaster decoded the same way")
+args = parser.parse_args()
+
+old = read_wav(args.old)
+new = read_wav(args.new)
 
 print("new_time_s, old_minus_new_s, matching_old_time_s, correlation")
 results = []

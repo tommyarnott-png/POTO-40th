@@ -1,0 +1,11 @@
+{
+  "name": "poto-40th",
+  "compatibility_date": "2026-09-15",
+  // Static assets only for now. The signup endpoint adds a Worker script here
+  // with one line — "main": "worker/index.ts" — and requests that match no
+  // asset and are not page navigations then reach it.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import {
   ArrowDown,
-  Download,
   LoaderCircle,
   Pause,
   Play,
@@ -17,7 +16,6 @@ import {
   OLD_MASTER_PLAYBACK_RATE,
   OLD_MASTER_START_OFFSET,
   PLAYBACK,
-  SOURCE_DOWNLOADS,
   STEM_DURATION,
   STEMS,
 } from "@/assets";
@@ -30,14 +28,25 @@ function formatTime(value: number) {
 }
 
 /**
- * Bar pitch in pixels: a 1px bar plus its gap. Kept in step with the `gap-*`
- * classes below, and used to work out how many bars a given width can hold.
+ * Bar geometry in CSS pixels: a 2px bar on a 3px pitch. The pitch decides how
+ * many bars a given width can hold.
  */
-const BAR_PITCH = { normal: 3, compact: 2 } as const;
+const BAR_WIDTH = 2;
+const BAR_PITCH = 3;
+const WAVE_PLAYED = "rgba(220,234,242,.92)";
+const WAVE_UNPLAYED = "rgba(165,190,211,.25)";
 
-/** Tracks the rendered width of an element as a usable bar count. */
-function useBarCount(ref: RefObject<HTMLElement | null>, pitch: number) {
-  const [count, setCount] = useState(0);
+/**
+ * How long the A/B switch takes to cross from one master to the other. Short
+ * enough to feel immediate, long enough that neither gain steps and clicks.
+ */
+const CROSSFADE_SECONDS = 0.06;
+
+type MasterId = "oldMaster" | "newMaster";
+
+/** Tracks the rendered size of an element, and how many bars its width holds. */
+function useBarLayout(ref: RefObject<HTMLElement | null>) {
+  const [layout, setLayout] = useState({ count: 0, width: 0, height: 0 });
 
   useEffect(() => {
     const element = ref.current;
@@ -45,13 +54,14 @@ function useBarCount(ref: RefObject<HTMLElement | null>, pitch: number) {
 
     const observer = new ResizeObserver(entries => {
       const width = entries[0]?.contentRect.width ?? 0;
-      setCount(Math.max(1, Math.floor(width / pitch)));
+      const height = entries[0]?.contentRect.height ?? 0;
+      setLayout({ count: Math.max(1, Math.floor(width / BAR_PITCH)), width, height });
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref, pitch]);
+  }, [ref]);
 
-  return count;
+  return layout;
 }
 
 /**
@@ -80,37 +90,60 @@ function resample(peaks: number[], count: number) {
   return bars;
 }
 
-function WaveBars({
-  peaks,
-  progress,
-  compact = false,
-}: {
-  peaks: number[];
-  progress: number;
-  compact?: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const pitch = compact ? BAR_PITCH.compact : BAR_PITCH.normal;
-  const bars = resample(peaks, useBarCount(containerRef, pitch));
+/**
+ * A mirrored waveform drawn to one canvas: rounded bars symmetrical about the
+ * centre line, bright up to the playhead and dim after it. One canvas per row
+ * keeps nine waveforms from costing several thousand DOM nodes of layout.
+ */
+function WaveBars({ peaks, progress }: { peaks: number[]; progress: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { count, width, height } = useBarLayout(canvasRef);
+  const bars = useMemo(() => resample(peaks, count), [peaks, count]);
+
+  // The bars only change with the data or the size, so the shape is built once
+  // per layout; each frame just moves the split between the two fills. Bars are
+  // spread across the full width so they stay in step with the playhead.
+  const shape = useMemo(() => {
+    const path = new Path2D();
+    const spacing = width / Math.max(1, bars.length);
+    bars.forEach((peak, index) => {
+      const barHeight = Math.max(BAR_WIDTH, peak * height * 0.92);
+      path.roundRect(index * spacing + (spacing - BAR_WIDTH) / 2, (height - barHeight) / 2, BAR_WIDTH, barHeight, BAR_WIDTH / 2);
+    });
+    return path;
+  }, [bars, width, height]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+
+    const scale = window.devicePixelRatio || 1;
+    const pixelWidth = Math.round(width * scale);
+    const pixelHeight = Math.round(height * scale);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+
+    const split = (progress / 100) * width;
+    const fills: [number, number, string][] = [[0, split, WAVE_PLAYED], [split, width, WAVE_UNPLAYED]];
+    context.setTransform(scale, 0, 0, scale, 0, 0);
+    context.clearRect(0, 0, width, height);
+    fills.forEach(([from, to, colour]) => {
+      context.save();
+      context.beginPath();
+      context.rect(from, 0, to - from, height);
+      context.clip();
+      context.fillStyle = colour;
+      context.fill(shape);
+      context.restore();
+    });
+  }, [shape, progress, width, height]);
 
   return (
-    <div
-      ref={containerRef}
-      className={`relative flex h-full w-full items-center overflow-hidden ${compact ? "gap-px" : "gap-[2px]"}`}
-      aria-hidden="true">
-      {bars.map((peak, index) => {
-        const passed = (index / Math.max(1, bars.length - 1)) * 100 <= progress;
-        return (
-          <span
-            key={index}
-            className="min-w-px flex-1 rounded-[1px] transition-colors duration-75"
-            style={{
-              height: `${Math.max(compact ? 12 : 8, peak * 92)}%`,
-              backgroundColor: passed ? "rgba(220,234,242,.92)" : "rgba(165,190,211,.25)",
-            }}
-          />
-        );
-      })}
+    <div className="relative h-full w-full overflow-hidden" aria-hidden="true">
+      <canvas ref={canvasRef} className="block h-full w-full" />
       <div className="absolute inset-y-0 w-px bg-white shadow-[0_0_8px_rgba(255,255,255,.75)]" style={{ left: `${progress}%` }} />
     </div>
   );
@@ -143,6 +176,17 @@ function Wordmark({ className, textClassName }: { className?: string; textClassN
   );
 }
 
+/**
+ * In-page links scroll with scrollIntoView rather than fragment navigation.
+ * Embedded in an auto-height frame the page has nothing of its own to scroll,
+ * and a fragment change would neither move the parent page nor stay out of its
+ * Back history.
+ */
+function scrollToTarget(event: ReactMouseEvent<HTMLAnchorElement>) {
+  event.preventDefault();
+  document.getElementById(event.currentTarget.hash.slice(1))?.scrollIntoView();
+}
+
 function pointerTime(event: ReactPointerEvent<HTMLElement>, duration: number) {
   const bounds = event.currentTarget.getBoundingClientRect();
   const ratio = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
@@ -165,7 +209,7 @@ export default function Home() {
   const stemsOffsetRef = useRef(0);
   const stemsPlayingRef = useRef(false);
 
-  const [masterMix, setMasterMix] = useState(100);
+  const [activeMaster, setActiveMaster] = useState<MasterId>("newMaster");
   const [masterTime, setMasterTime] = useState(0);
   const [masterPlaying, setMasterPlaying] = useState(false);
   const [masterLoading, setMasterLoading] = useState(false);
@@ -237,24 +281,27 @@ export default function Home() {
     });
   }
 
-  function updateMasterGain(nextMix = masterMix) {
+  /**
+   * Crosses the two running masters to `nextMaster` with a linear ramp. The
+   * recordings are the same performance, so equal-gain crossfading keeps the
+   * level steady where an equal-power curve would bump it mid-ramp.
+   */
+  function updateMasterGain(nextMaster = activeMaster) {
     const context = audioContextRef.current;
     if (!context) return;
-    const mix = nextMix / 100;
     const baseGain = outputMuted ? 0 : 0.84;
-    const oldLevel = (1 - mix) * baseGain * OLD_MASTER_GAIN_COMPENSATION;
-    const newLevel = mix * baseGain;
+    const levels: Record<MasterId, number> = {
+      oldMaster: nextMaster === "oldMaster" ? baseGain * OLD_MASTER_GAIN_COMPENSATION : 0,
+      newMaster: nextMaster === "newMaster" ? baseGain : 0,
+    };
     const now = context.currentTime;
-    const oldGain = masterGainsRef.current.oldMaster;
-    const newGain = masterGainsRef.current.newMaster;
-    if (oldGain) {
-      oldGain.gain.cancelScheduledValues(now);
-      oldGain.gain.setTargetAtTime(oldLevel, now, 0.012);
-    }
-    if (newGain) {
-      newGain.gain.cancelScheduledValues(now);
-      newGain.gain.setTargetAtTime(newLevel, now, 0.012);
-    }
+    (["oldMaster", "newMaster"] as const).forEach((id) => {
+      const gain = masterGainsRef.current[id];
+      if (!gain) return;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(levels[id], now + CROSSFADE_SECONDS);
+    });
   }
 
   function updateStemGains() {
@@ -302,7 +349,7 @@ export default function Home() {
     masterStartedAtRef.current = when;
     masterPlayingRef.current = true;
     setMasterPlaying(true);
-    updateMasterGain(masterMix);
+    updateMasterGain(activeMaster);
   }
 
   function pauseMasters() {
@@ -402,13 +449,16 @@ export default function Home() {
     if (wasPlaying) await startStems(target);
   }
 
+  // Also runs as playback starts, so a switch made while the masters were still
+  // loading is the one that plays.
   useEffect(() => {
-    updateMasterGain(masterMix);
-  }, [masterMix, outputMuted]);
+    updateMasterGain(activeMaster);
+  }, [activeMaster, outputMuted, masterPlaying]);
 
+  // Likewise, so solo, mute and levels set while the stems were loading apply.
   useEffect(() => {
     updateStemGains();
-  }, [stemVolume, stemMute, stemSolo, outputMuted]);
+  }, [stemVolume, stemMute, stemSolo, outputMuted, stemsPlaying]);
 
   useEffect(() => {
     let frame = 0;
@@ -461,12 +511,17 @@ export default function Home() {
     ["Merchandise", "https://store.playbill.co.uk/phantom"],
   ];
 
+  const masters = [
+    { id: "oldMaster", mask: BRAND.maskOriginal, title: "The old master of The Phantom of the Opera", label: "1986 original" },
+    { id: "newMaster", mask: BRAND.maskRemaster, title: "The new remaster of The Phantom of the Opera", label: "2026 remaster" },
+  ] as const;
+
   return (
-    <div className="min-h-screen bg-[#00060f] text-white" style={{ backgroundImage: `linear-gradient(rgba(0,6,15,.2), rgba(0,6,15,.48)), url(${BRAND.background})`, backgroundSize: "920px auto", backgroundRepeat: "repeat" }}>
+    <div className="bg-[#00060f] text-white" style={{ backgroundImage: `linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
       <header className="sticky top-0 z-50 border-b border-white/15 bg-[#00060f]/94 backdrop-blur-xl">
         <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
           <div className="flex h-[86px] items-center justify-between gap-4 sm:gap-8">
-            <a href="#top" aria-label="The Phantom of the Opera" className="block shrink-0">
+            <a href="#top" onClick={scrollToTarget} aria-label="The Phantom of the Opera" className="block shrink-0">
               <Wordmark className="h-auto w-[148px] sm:w-[232px]" textClassName="text-[13px] sm:text-[17px]" />
             </a>
             <a href="https://ticketing.lwtheatres.co.uk/event/121/" target="_blank" rel="noreferrer" className="bg-gradient-to-r from-[#6a99ab] to-[#a5bed3] px-3 py-2.5 text-[9px] font-medium uppercase tracking-[0.12em] text-[#00060f] transition-opacity hover:opacity-90 sm:px-5 sm:py-3 sm:text-[11px] sm:tracking-[0.16em]">
@@ -484,12 +539,12 @@ export default function Home() {
       <main id="top">
         <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
           <p className="mb-5 text-[11px] uppercase tracking-[0.24em] text-[#a5bed3]">The original London production</p>
-          <h1 className="text-[42px] font-light uppercase leading-[0.95] tracking-[0.08em] text-[#a5bed3] sm:text-[66px]">The Phantom Awaits</h1>
-          <h2 className="mt-3 text-[13px] font-light uppercase tracking-[0.24em] text-white sm:text-[16px]">At His Majesty&apos;s Theatre, London</h2>
-          <p className="mt-8 max-w-[620px] text-[15px] leading-7 text-white/72">
+          <h1 className="text-[42px] font-light uppercase leading-[0.95] tracking-[0.08em] text-[#a5bed3] sm:text-[66px]">The Original Cast Recording</h1>
+          <h2 className="mt-3 text-[13px] font-light uppercase tracking-[0.24em] text-white sm:text-[16px]">Like You&apos;ve Never Heard Before</h2>
+          <p className="font-detail mt-8 max-w-[620px] text-[15px] leading-7 text-white/72">
             Hear The Phantom of the Opera in two ways: compare the original and new masters, then scroll down to explore the new remaster as eight synchronized stems.
           </p>
-          <a href="#masters" className="mt-10 flex flex-col items-center gap-2 text-[10px] uppercase tracking-[0.17em] text-[#a5bed3]">
+          <a href="#masters" onClick={scrollToTarget} className="mt-10 flex flex-col items-center gap-2 text-[10px] uppercase tracking-[0.17em] text-[#a5bed3]">
             Begin listening <ArrowDown className="h-4 w-4" />
           </a>
         </section>
@@ -498,8 +553,8 @@ export default function Home() {
           <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
             <div className="mb-12 max-w-[700px]">
               <p className="text-[11px] uppercase tracking-[0.22em] text-[#a5bed3]">01 — Masters A / B</p>
-              <h2 className="mt-4 text-[36px] font-light leading-tight tracking-[-0.02em] sm:text-[52px]">One performance. Two masters.</h2>
-              <p className="mt-5 max-w-[620px] text-[15px] leading-7 text-white/65">Press play once, then move the fader continuously between the original master and the new remaster. Both files run from the same sample-accurate audio clock.</p>
+              <h2 className="mt-4 text-[36px] font-light leading-tight tracking-[-0.02em] sm:text-[52px]">One performance. Two mixes.</h2>
+              <p className="font-detail mt-5 max-w-[620px] text-[15px] leading-7 text-white/65">Press play once, then switch between the original master and the new remaster at any moment. Both files run from the same sample-accurate audio clock.</p>
             </div>
 
             <div className="border border-[#a5bed3]/25 bg-[#020a15]/80 p-5 shadow-[0_30px_80px_rgba(0,0,0,.28)] sm:p-9">
@@ -535,32 +590,32 @@ export default function Home() {
                 <WaveBars peaks={trackPeaks.new_master} progress={masterProgress} />
               </div>
 
-              <div className="mt-8 border-t border-white/12 pt-8">
-                <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-4 text-[11px] sm:gap-8">
-                  <div>
-                    <p className="text-white">The old master of The Phantom of the Opera</p>
-                    <p className="mt-1 uppercase tracking-[0.12em] text-white/42">1986 original</p>
-                  </div>
-                  <p className="pb-0.5 text-center uppercase tracking-[0.15em] text-[#a5bed3]">A / B Fader</p>
-                  <div className="text-right">
-                    <p className="text-white">The new remaster of The Phantom of the Opera</p>
-                    <p className="mt-1 uppercase tracking-[0.12em] text-white/42">2026 remaster</p>
-                  </div>
+              <fieldset className="mt-8 min-w-0 border-t border-white/12 pt-8">
+                <legend className="sr-only">Choose which master you hear</legend>
+                <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-4 text-[11px] sm:gap-8">
+                  {masters.map((master, index) => {
+                    const active = activeMaster === master.id;
+                    return (
+                      <label key={master.id} className={`group block cursor-pointer ${index === 0 ? "col-start-1" : "col-start-3 text-right"} row-start-1`}>
+                        <input type="radio" name="master" value={master.id} checked={active} onChange={() => setActiveMaster(master.id)} className="peer sr-only" />
+                        {/* The masks sit on black. Screen blending lets the page show through it, the
+                            slight contrast lift takes the photo's near-black noise to true black first,
+                            and the clip trims the grey pixel edges the source files carry. */}
+                        <img
+                          src={master.mask}
+                          alt=""
+                          className={`mx-auto block aspect-square w-full max-w-[240px] contrast-[1.08] mix-blend-screen transition-opacity duration-300 [clip-path:inset(1px)] ${active ? "opacity-100" : "opacity-30 group-hover:opacity-55"}`}
+                        />
+                        <span className="mt-3 block outline-offset-4 peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-[#a5bed3]">
+                          <span className={`block transition-colors ${active ? "text-white" : "text-white/55"}`}>{master.title}</span>
+                          <span className={`mt-1 block uppercase tracking-[0.12em] ${active ? "text-[#a5bed3]" : "text-white/42"}`}>{master.label}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  <p className="col-start-2 row-start-1 self-center pb-0.5 text-center uppercase tracking-[0.15em] text-[#a5bed3]">A / B</p>
                 </div>
-                <input aria-label="Continuous old to new master fader" type="range" min="0" max="100" step="0.1" value={masterMix} onChange={(event) => setMasterMix(Number(event.target.value))} className="ab-fader mt-5 w-full cursor-ew-resize" />
-                <div className="mt-3 flex justify-between text-[10px] uppercase tracking-[0.13em] text-[#a5bed3]">
-                  <span>Old {Math.round(100 - masterMix)}%</span>
-                  <span>New {Math.round(masterMix)}%</span>
-                </div>
-              </div>
-
-              {SOURCE_DOWNLOADS && (
-                <div className="mt-8 flex flex-wrap gap-3 border-t border-white/12 pt-6">
-                  <a href={SOURCE_DOWNLOADS.oldMaster} download className="download-link"><Download className="h-3.5 w-3.5" /> Download old master WAV</a>
-                  <a href={SOURCE_DOWNLOADS.newMaster} download className="download-link"><Download className="h-3.5 w-3.5" /> Download new remaster WAV</a>
-                  <a href={SOURCE_DOWNLOADS.stemsZip} download className="download-link"><Download className="h-3.5 w-3.5" /> Download source stems</a>
-                </div>
-              )}
+              </fieldset>
             </div>
           </div>
         </section>
@@ -570,14 +625,11 @@ export default function Home() {
             <div className="mb-10 flex flex-col justify-between gap-7 sm:flex-row sm:items-end">
               <div className="max-w-[700px]">
                 <p className="text-[11px] uppercase tracking-[0.22em] text-[#a5bed3]">02 — New remaster stems</p>
-                <h2 className="mt-4 text-[36px] font-light leading-tight tracking-[-0.02em] sm:text-[52px]">Inside the remaster.</h2>
-                <p className="mt-5 max-w-[640px] text-[15px] leading-7 text-white/65">Every stem starts together on one clock. Press play on any row to hear the complete arrangement, then solo, mute or rebalance individual parts without timing drift.</p>
+                <h2 className="mt-4 text-[36px] font-light leading-tight tracking-[-0.02em] sm:text-[52px]">Inside the new mix.</h2>
+                <p className="font-detail mt-5 max-w-[640px] text-[15px] leading-7 text-white/65">Every stem starts together on one clock. Press play on any row to hear the complete arrangement, then solo, mute or rebalance individual parts without timing drift.</p>
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => { setStemMute(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemSolo(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemVolume(Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86]))); }} className="text-[10px] uppercase tracking-[0.16em] text-[#a5bed3] hover:text-white">Reset mix</button>
-                {SOURCE_DOWNLOADS && (
-                  <a href={SOURCE_DOWNLOADS.stemsZip} download className="download-link"><Download className="h-3.5 w-3.5" /> Download stems</a>
-                )}
               </div>
             </div>
 
@@ -586,8 +638,8 @@ export default function Home() {
                 const anySolo = Object.values(stemSolo).some(Boolean);
                 const audible = !stemMute[stem.id] && (!anySolo || stemSolo[stem.id]);
                 return (
-                  <article key={stem.id} className={`grid grid-cols-[38px_minmax(84px,120px)_minmax(54px,1fr)_auto] items-center gap-2 border-b border-white/12 py-4 transition-opacity sm:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto] sm:gap-5 ${audible ? "opacity-100" : "opacity-45"}`}>
-                    <button onClick={toggleStems} disabled={stemsLoading} aria-label={`${stemsPlaying ? "Pause" : "Play"} all stems from ${stem.name} row`} className="grid h-9 w-9 place-items-center rounded-full border border-[#a5bed3]/45 text-[#a5bed3] transition-colors hover:border-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f] disabled:cursor-wait">
+                  <article key={stem.id} className={`grid grid-cols-[38px_minmax(84px,120px)_minmax(54px,1fr)_auto] items-center gap-2 border-b border-white/12 py-4 transition-opacity sm:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto] sm:gap-5 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
+                    <button onClick={toggleStems} disabled={stemsLoading} aria-label={`${stemsPlaying ? "Pause" : "Play"} all stems from ${stem.name} row`} className="relative grid h-9 w-9 place-items-center rounded-full border border-[#a5bed3]/45 text-[#a5bed3] transition-colors before:absolute before:-inset-[5px] before:content-[''] hover:border-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f] disabled:cursor-wait">
                       {stemsLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
                     </button>
                     <div className="min-w-0">
@@ -595,7 +647,7 @@ export default function Home() {
                       <p className="mt-1 text-[9px] uppercase tracking-[0.15em] text-[#7798ac]">{stem.group}</p>
                     </div>
                     <div
-                      className="relative h-[38px] min-w-0 cursor-pointer"
+                      className="relative h-[38px] min-w-0 cursor-pointer before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-['']"
                       role="slider"
                       tabIndex={0}
                       aria-label={`${stem.name} playback position`}
@@ -607,13 +659,12 @@ export default function Home() {
                         if (event.key === "ArrowLeft") seekStems(stemsTime - 5);
                         if (event.key === "ArrowRight") seekStems(stemsTime + 5);
                       }}>
-                      <WaveBars peaks={trackPeaks.stems[stem.id]} progress={stemProgress} compact />
+                      <WaveBars peaks={trackPeaks.stems[stem.id]} progress={stemProgress} />
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                       <button onClick={() => setStemSolo((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemSolo[stem.id] ? "active" : ""}`} aria-label={`Solo ${stem.name}`}>S</button>
                       <button onClick={() => setStemMute((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemMute[stem.id] ? "active" : ""}`} aria-label={`Mute ${stem.name}`}>M</button>
-                      <input aria-label={`${stem.name} volume`} type="range" min="0" max="1" step="0.01" value={stemVolume[stem.id]} onChange={(event) => setStemVolume((previous) => ({ ...previous, [stem.id]: Number(event.target.value) }))} className="hidden w-20 cursor-pointer lg:block" />
-                      <a href={stem.file} download aria-label={`Download ${stem.name}`} className="hidden h-8 w-8 place-items-center text-[#7899ad] transition-colors hover:text-white sm:grid"><Download className="h-3.5 w-3.5" /></a>
+                      <input aria-label={`${stem.name} volume`} type="range" min="0" max="1" step="0.01" value={stemVolume[stem.id]} onChange={(event) => setStemVolume((previous) => ({ ...previous, [stem.id]: Number(event.target.value) }))} className="hidden w-28 cursor-pointer md:block lg:w-32" />
                     </div>
                   </article>
                 );

@@ -1,3 +1,12 @@
+"""
+Fits the drift between the 1986 master and the 2026 remaster from their loudness
+envelopes, giving the old master's start offset and playback-rate ratio.
+
+    ffmpeg -i OLD_MASTER.wav -ac 1 -ar 8000 -c:a pcm_s16le old-8k.wav
+    ffmpeg -i NEW_MASTER.wav -ac 1 -ar 8000 -c:a pcm_s16le new-8k.wav
+    python3 tools/measure_envelope_drift.py old-8k.wav new-8k.wav
+"""
+import argparse
 import wave
 import numpy as np
 
@@ -47,8 +56,13 @@ def best_offset(old_env: np.ndarray, new_env: np.ndarray, center_seconds: float,
     return lag / ENVELOPE_HZ, score
 
 
-old_env = envelope(read_wav("/home/ubuntu/phantom-audio-analysis/old-8k.wav"))
-new_env = envelope(read_wav("/home/ubuntu/phantom-audio-analysis/new-8k.wav"))
+parser = argparse.ArgumentParser(description="Fit the drift between the two masters.")
+parser.add_argument("old", help="1986 master decoded to 8kHz 16-bit mono PCM WAV")
+parser.add_argument("new", help="2026 remaster decoded the same way")
+args = parser.parse_args()
+
+old_env = envelope(read_wav(args.old))
+new_env = envelope(read_wav(args.new))
 
 rows = []
 print("new_time_s, old_minus_new_s, correlation")

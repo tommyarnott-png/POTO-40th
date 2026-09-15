@@ -2,13 +2,13 @@
 /**
  * Generates src/data/trackPeaks.json — the pre-computed waveform envelopes the
  * player renders. Doing this at build time means the UI can draw all nine
- * waveforms immediately, without downloading and decoding ~30MB of audio first.
+ * waveforms immediately, without downloading and decoding ~13.5MB of audio first.
  *
  *   node tools/generate-peaks.mjs
  *
- * Reads the MP3s from public/audio (run scripts/build-audio.sh first) and
+ * Reads the AAC files from public/audio (run scripts/build-audio.sh first) and
  * shells out to ffmpeg to decode each one to low-rate mono PCM, so the same
- * code path handles the 44.1kHz and 48kHz sources uniformly.
+ * code path handles any source sample rate uniformly.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -31,6 +31,16 @@ const STEM_BARS = 512;
 /** Decode to 8kHz mono 16-bit PCM — ample resolution for an envelope. */
 const DECODE_RATE = 8000;
 
+/**
+ * Exponent applied to stem bar heights. The stems share one scale, so a stem
+ * 12dB down would otherwise draw at a quarter height with its detail pressed
+ * flat. 0.7 compresses level differences by 30% in dB: that stem draws at 38%,
+ * a passage 26dB down at 12% rather than 5%, and the order of the stems and the
+ * shape of each is unchanged. The master is left linear — it sits in the top
+ * half of its range already, and a curve would only flatten its dynamics.
+ */
+const STEM_CURVE = 0.7;
+
 function decode(file) {
   const raw = execFileSync(
     "ffmpeg",
@@ -41,13 +51,11 @@ function decode(file) {
 }
 
 /**
- * Reduces samples to `bars` peak values in 0..1.
+ * Reduces samples to `bars` loudness values.
  *
  * Each bar is the RMS of its bucket rather than the absolute maximum: RMS
  * tracks perceived loudness, where max-abs is dominated by isolated transients
- * and flattens the whole envelope. Values are then normalised against the
- * track's own loudest bar, so every row draws a legible waveform regardless of
- * how quiet the stem sits in the mix.
+ * and flattens the whole envelope.
  */
 function envelope(samples, bars) {
   const bucket = samples.length / bars;
@@ -64,9 +72,13 @@ function envelope(samples, bars) {
     peaks[i] = end > start ? Math.sqrt(sum / (end - start)) : 0;
   }
 
-  const loudest = Math.max(...peaks);
+  return peaks;
+}
+
+/** Scales bars to 0..1 against `loudest`, then applies `curve`. */
+function normalise(peaks, loudest, curve = 1) {
   const scale = loudest > 0 ? 1 / loudest : 0;
-  return peaks.map(peak => Number((peak * scale).toFixed(4)));
+  return peaks.map(peak => Number(((peak * scale) ** curve).toFixed(4)));
 }
 
 const STEM_IDS = [
@@ -80,15 +92,25 @@ const STEM_IDS = [
   "orchestra",
 ];
 
-console.log("Measuring new_master.mp3");
+console.log("Measuring new_master.m4a");
+const master = envelope(decode(join(AUDIO, "new_master.m4a")), MASTER_BARS);
+
+const stems = {};
+for (const id of STEM_IDS) {
+  console.log(`Measuring stems/${id}.m4a`);
+  stems[id] = envelope(decode(join(AUDIO, "stems", `${id}.m4a`)), STEM_BARS);
+}
+
+// The master is normalised on its own. The stems share the loudest bar across
+// all eight, so a quiet stem draws quietly and the balance of the mix reads at
+// a glance instead of every row filling its height.
+const loudestStem = Math.max(...Object.values(stems).flat());
 const trackPeaks = {
-  new_master: envelope(decode(join(AUDIO, "new_master.mp3")), MASTER_BARS),
+  new_master: normalise(master, Math.max(...master)),
   stems: {},
 };
-
 for (const id of STEM_IDS) {
-  console.log(`Measuring stems/${id}.mp3`);
-  trackPeaks.stems[id] = envelope(decode(join(AUDIO, "stems", `${id}.mp3`)), STEM_BARS);
+  trackPeaks.stems[id] = normalise(stems[id], loudestStem, STEM_CURVE);
 }
 
 mkdirSync(dirname(OUT), { recursive: true });

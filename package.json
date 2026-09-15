@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "peaks": "node tools/generate-peaks.mjs"
+    "peaks": "node tools/generate-peaks.mjs",
+    "deploy": "npm run build && npx wrangler@4 deploy"
   },
   "dependencies": {
     "lucide-react": "^0.469.0",
