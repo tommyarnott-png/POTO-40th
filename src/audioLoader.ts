@@ -50,44 +50,61 @@ function hold(context: BaseAudioContext, decoded: AudioBuffer, track: Track, tri
   return { buffer, start: first / decoded.sampleRate };
 }
 
-export function createTrackSet(tracks: Track[], { trim = false } = {}) {
+/**
+ * `onTrack` is told each time a track of the current load is ready to play, so a
+ * player can use tracks as they arrive rather than waiting for the whole set.
+ */
+export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { trim?: boolean; onTrack?: (id: string) => void } = {}) {
   let held: HeldTracks | null = null;
+  let ready: HeldTracks = {};
   let pending: Promise<HeldTracks | null> | null = null;
   let generation = 0;
 
   async function fetchAndDecode(expected: number) {
-    const files = await Promise.all(tracks.map(async (track) => {
+    // Downloads run together and each track decodes as soon as it arrives, but
+    // only one decode runs at a time: a decode briefly holds its track at the
+    // file's own rate as well as the player's.
+    const decoder = new OfflineAudioContext(1, 1, PLAYBACK_SAMPLE_RATE);
+    let decoding = Promise.resolve();
+    await Promise.all(tracks.map(async (track) => {
       const response = await fetch(track.file);
       if (!response.ok) throw new Error(`Unable to load ${track.id}`);
-      return response.arrayBuffer();
+      const file = await response.arrayBuffer();
+      decoding = decoding.then(async () => {
+        if (expected !== generation) return;
+        const decoded = hold(decoder, await decoder.decodeAudioData(file), track, trim);
+        if (expected !== generation) return;
+        ready[track.id] = decoded;
+        onTrack?.(track.id);
+      });
+      await decoding;
     }));
-
-    // Downloads run together, but decodes run one after another: a decode
-    // briefly holds its track at the file's own rate as well as the player's.
-    const decoder = new OfflineAudioContext(1, 1, PLAYBACK_SAMPLE_RATE);
-    const next: HeldTracks = {};
-    for (const [index, track] of tracks.entries()) {
-      if (expected !== generation) return null;
-      next[track.id] = hold(decoder, await decoder.decodeAudioData(files[index]), track, trim);
-    }
     if (expected !== generation) return null;
-    held = next;
-    return next;
+    held = ready;
+    return held;
   }
 
   return {
     get held() {
       return held;
     },
+    /** The tracks of the current load that are ready so far; the whole set once it has loaded. */
+    get ready() {
+      return ready;
+    },
     load() {
       if (held) return Promise.resolve(held);
       if (!pending) {
         const expected = generation;
         // A released load comes to nothing whether it succeeds or fails, so a
-        // late failure can't disturb whatever has been asked for since.
+        // late failure can't disturb whatever has been asked for since. A load
+        // that fails drops what it had decoded, and decodes still queued behind
+        // the failure come to nothing too.
         const request: Promise<HeldTracks | null> = fetchAndDecode(expected)
           .catch((error) => {
             if (expected !== generation) return null;
+            generation += 1;
+            ready = {};
             throw error;
           })
           .finally(() => {
@@ -100,6 +117,7 @@ export function createTrackSet(tracks: Track[], { trim = false } = {}) {
     release() {
       generation += 1;
       held = null;
+      ready = {};
       pending = null;
     },
   };

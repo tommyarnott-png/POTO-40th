@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import {
   ArrowDown,
   LoaderCircle,
@@ -23,6 +23,7 @@ import {
 import type { StemId } from "@/assets";
 import { createTrackSet } from "@/audioLoader";
 import trackPeaks from "@/data/trackPeaks.json";
+import { embedded } from "@/embed";
 
 function formatTime(value: number) {
   const seconds = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -36,8 +37,9 @@ function formatTime(value: number) {
  */
 const BAR_WIDTH = 2;
 const BAR_PITCH = 3;
-const WAVE_PLAYED = "rgba(220,234,242,.92)";
-const WAVE_UNPLAYED = "rgba(165,190,211,.25)";
+/** The official site's accent for what has played, and its rule colour for what has not. */
+const WAVE_PLAYED = "#a5bed3";
+const WAVE_UNPLAYED = "#3b4154";
 
 /**
  * The A/B cut. The two versions' vocals sit up to 43ms apart, so any real
@@ -51,10 +53,18 @@ const SWITCH_STEPS = 8;
 const FADE_SECONDS = 0.005;
 const START_DELAY_SECONDS = 0.02;
 
+/**
+ * The crossfade slider. A drag starts once the pointer has moved this far, mostly
+ * sideways, so a landing touch or a scroll does not nudge the mix; and a full
+ * crossfade always takes at least this much pointer travel, however narrow the frame.
+ */
+const FADE_SLOP_PX = 6;
+const FADE_TRAVEL_PX = 400;
+
 type MasterId = "oldMaster" | "newMaster";
 type Transport = "masters" | "stems";
 type LoadState = "idle" | "loading" | "ready";
-type Voice = { source: AudioBufferSourceNode; gain: GainNode };
+type Voice = { source: AudioBufferSourceNode; gain: GainNode; when: number };
 type Voices = Record<string, Voice>;
 
 function isRunning(voices: Voices) {
@@ -166,30 +176,13 @@ function WaveBars({ peaks, progress }: { peaks: number[]; progress: number }) {
   );
 }
 
-/**
- * The official white production logo is not redistributed with this repo (see
- * docs/ASSETS.md). Rather than render a broken image when it has not been
- * dropped in, fall back to a typeset wordmark in the production's own palette.
- */
-function Wordmark({ className, textClassName }: { className?: string; textClassName?: string }) {
-  const [failed, setFailed] = useState(false);
-
-  if (failed) {
-    return (
-      <span
-        className={`block whitespace-nowrap font-light uppercase leading-tight tracking-[0.14em] text-[#a5bed3] ${textClassName ?? ""}`}>
-        The Phantom<span className="text-white/55"> of the </span>Opera
-      </span>
-    );
-  }
-
+/** The official white wordmark, as AVIF where the browser takes it and PNG where it does not. */
+function Wordmark({ className }: { className?: string }) {
   return (
-    <img
-      src={BRAND.logo}
-      alt="Andrew Lloyd Webber's The Phantom of the Opera"
-      className={className}
-      onError={() => setFailed(true)}
-    />
+    <picture>
+      <source srcSet={BRAND.logoAvif} type="image/avif" />
+      <img src={BRAND.logo} alt="Andrew Lloyd Webber's The Phantom of the Opera" width={1092} height={330} className={className} />
+    </picture>
   );
 }
 
@@ -216,7 +209,7 @@ export default function Home() {
     { id: "oldMaster", file: PLAYBACK.oldMaster },
     { id: "newMaster", file: PLAYBACK.newMaster },
   ]));
-  const [stemSet] = useState(() => createTrackSet(STEMS, { trim: true }));
+  const [stemSet] = useState(() => createTrackSet(STEMS, { trim: true, onTrack: joinStem }));
 
   // What the visitor has asked for, as distinct from what is sounding: the
   // transport that should be running, and a count every play, pause and seek
@@ -246,13 +239,18 @@ export default function Home() {
   const stemsApproachRef = useRef<HTMLDivElement>(null);
   const stemListRef = useRef<HTMLDivElement>(null);
 
-  const [activeMaster, setActiveMaster] = useState<MasterId>("newMaster");
+  /** The crossfade: 0 is the 1986 original alone, 1 the 2026 remaster alone. */
+  const [fade, setFade] = useState(1);
+  const [fadeDragging, setFadeDragging] = useState(false);
+  const fadeDragRef = useRef<{ pointer: number; x: number; y: number; from: number; started: boolean } | null>(null);
   const [wanted, setWanted] = useState<Transport | null>(null);
   const [masterLoad, setMasterLoad] = useState<LoadState>("idle");
   const [masterTime, setMasterTime] = useState(0);
   const [masterPlaying, setMasterPlaying] = useState(false);
 
   const [stemLoad, setStemLoad] = useState<LoadState>("idle");
+  /** Stems of the current load that have decoded, for the rows' ready state. */
+  const [stemReady, setStemReady] = useState<Record<string, boolean>>({});
   const [stemsTime, setStemsTime] = useState(0);
   const [stemsPlaying, setStemsPlaying] = useState(false);
   const [stemVolume, setStemVolume] = useState<Record<string, number>>(() => Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86])));
@@ -261,8 +259,8 @@ export default function Home() {
   const [outputMuted, setOutputMuted] = useState(false);
 
   // The side and mix as last rendered, for audio that starts after an await.
-  const mixRef = useRef({ activeMaster, outputMuted, stemVolume, stemMute, stemSolo });
-  mixRef.current = { activeMaster, outputMuted, stemVolume, stemMute, stemSolo };
+  const mixRef = useRef({ fade, outputMuted, stemVolume, stemMute, stemSolo });
+  mixRef.current = { fade, outputMuted, stemVolume, stemMute, stemSolo };
 
   const masterProgress = Math.min(100, (masterTime / MASTER_DURATION) * 100);
   const stemProgress = Math.min(100, (stemsTime / STEM_DURATION) * 100);
@@ -307,7 +305,9 @@ export default function Home() {
       },
       (error) => {
         setStemLoad("idle");
-        if (wantedRef.current === "stems") setWantedTransport(null);
+        setStemReady({});
+        // Stems may already be sounding, so the transport stops as well as the wait.
+        if (wantedRef.current === "stems") pauseStems();
         throw error;
       },
     );
@@ -323,6 +323,7 @@ export default function Home() {
     mastersSpareRef.current = false;
     stemSet.release();
     setStemLoad("idle");
+    setStemReady({});
   }
 
   function releaseSpareMasters() {
@@ -339,7 +340,7 @@ export default function Home() {
     gain.gain.linearRampToValueAtTime(level, when + FADE_SECONDS);
     source.connect(gain).connect(context.destination);
     source.onended = () => gain.disconnect();
-    return { source, gain };
+    return { source, gain, when };
   }
 
   /** Fades voices out and stops them once silent; they stay alive until the fade ends. */
@@ -359,12 +360,20 @@ export default function Home() {
     });
   }
 
+  /**
+   * The masters' gains for the crossfade position, on an equal-power law. Measured
+   * across the section (BS.1770 loudness) it stays within 0.24LU of the ends at every
+   * position, where a linear law dips 3.23LU at the centre: the two versions correlate
+   * at -0.05, band-only passages included, so they add as unrelated signals. At 0.84
+   * the centre peaked 0.09dB over full scale; at 0.78 the loudest position peaks at
+   * -0.55dBFS. Sines keep the ends exactly 0 and 1.
+   */
   function masterLevels(): Record<MasterId, number> {
-    const { activeMaster: side, outputMuted: muted } = mixRef.current;
-    const level = muted ? 0 : 0.84;
+    const { fade: toRemaster, outputMuted: muted } = mixRef.current;
+    const level = muted ? 0 : 0.78;
     return {
-      oldMaster: side === "oldMaster" ? level * OLD_MASTER_GAIN_COMPENSATION : 0,
-      newMaster: side === "newMaster" ? level : 0,
+      oldMaster: level * OLD_MASTER_GAIN_COMPENSATION * Math.sin((Math.PI / 2) * (1 - toRemaster)),
+      newMaster: level * Math.sin((Math.PI / 2) * toRemaster),
     };
   }
 
@@ -403,14 +412,14 @@ export default function Home() {
     const context = audioContextRef.current;
     if (!context) return;
     const now = context.currentTime;
-    const notStarted = now < stemsStartedAtRef.current;
-    const at = Math.max(now, stemsStartedAtRef.current);
     STEMS.forEach((stem) => {
       const voice = stemVoicesRef.current[stem.id];
       if (!voice) return;
+      // Each voice from its own start: a stem that joined late may not have begun.
+      const at = Math.max(now, voice.when);
       const param = voice.gain.gain;
       param.cancelScheduledValues(now);
-      param.setValueAtTime(notStarted ? 0 : param.value, at);
+      param.setValueAtTime(now < voice.when ? 0 : param.value, at);
       param.setTargetAtTime(stemLevel(stem.id), at, 0.01);
     });
   }
@@ -478,14 +487,26 @@ export default function Home() {
     stemsOffsetRef.current = offset;
     setStemsTime(offset);
 
-    const held = await loadStems();
+    const loading = loadStems();
+    // Stems already decoded start now and the rest join as they decode. With none
+    // decoded yet the start waits for the whole set, so the arrangement opens
+    // complete rather than on whichever file happened to download first.
+    if (Object.keys(stemSet.ready).length === 0) await loading;
     await resumed;
-    if (request !== requestRef.current || !held) return;
+    const ready = stemSet.ready;
+    if (request !== requestRef.current || Object.keys(ready).length === 0) return;
 
     const when = context.currentTime + START_DELAY_SECONDS;
-    const position = Math.min(stemsOffsetRef.current, STEM_DURATION - 0.02);
-    stemVoicesRef.current = Object.fromEntries(STEMS.map((stem) => {
-      const { buffer, start } = held[stem.id];
+    // Snapped to a whole frame, and the stems drift apart without it. A stem whose
+    // trimmed audio has not begun is scheduled by delaying its start; the rest play
+    // from an offset into their buffers. Engines treat a fraction of a frame
+    // differently in the two (Chrome rounds an offset to the nearest frame but keeps
+    // the fraction in a start time), so from a fractional position the two groups
+    // land up to half a frame apart. Nothing hears that but a null test. A whole
+    // frame leaves nothing to round.
+    const position = Math.round(Math.min(stemsOffsetRef.current, STEM_DURATION - 0.02) * PLAYBACK_SAMPLE_RATE) / PLAYBACK_SAMPLE_RATE;
+    stemVoicesRef.current = Object.fromEntries(STEMS.filter((stem) => ready[stem.id]).map((stem) => {
+      const { buffer, start } = ready[stem.id];
       const voice = createVoice(context, buffer, stemLevel(stem.id), when);
       // A stem's leading silence isn't held, so it enters at its place on the shared clock.
       voice.source.start(when + Math.max(0, start - position), Math.max(0, position - start));
@@ -496,6 +517,24 @@ export default function Home() {
     stemsStartedAtRef.current = when;
     setStemsPlaying(true);
     releaseMasters();
+  }
+
+  /**
+   * Marks a stem's row ready as it decodes and, if the others are already playing,
+   * joins it to their clock: it starts a whole number of frames after them, at the
+   * position they have reached by then, so it is in time from its first sample.
+   */
+  function joinStem(id: string) {
+    setStemReady((previous) => ({ ...previous, [id]: true }));
+    const context = audioContextRef.current;
+    if (!context || !isRunning(stemVoicesRef.current)) return;
+    const { buffer, start } = stemSet.ready[id];
+    const frames = Math.max(0, Math.ceil((context.currentTime + START_DELAY_SECONDS - stemsStartedAtRef.current) * PLAYBACK_SAMPLE_RATE));
+    const when = stemsStartedAtRef.current + frames / PLAYBACK_SAMPLE_RATE;
+    const position = (Math.round(stemsOffsetRef.current * PLAYBACK_SAMPLE_RATE) + frames) / PLAYBACK_SAMPLE_RATE;
+    const voice = createVoice(context, buffer, stemLevel(id as StemId), when);
+    voice.source.start(when + Math.max(0, start - position), Math.max(0, position - start));
+    stemVoicesRef.current[id] = voice;
   }
 
   function pauseMasters() {
@@ -533,6 +572,15 @@ export default function Home() {
     void requestMasters(target);
   }
 
+  /** Ends a crossfade drag; a gesture the browser takes back for scrolling leaves the mix where it was. */
+  function releaseFade(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = fadeDragRef.current;
+    if (drag?.pointer !== event.pointerId) return;
+    if (event.type === "pointercancel") setFade(drag.from);
+    fadeDragRef.current = null;
+    setFadeDragging(false);
+  }
+
   function seekStems(nextTime: number) {
     const target = Math.min(STEM_DURATION, Math.max(0, nextTime));
     stemsOffsetRef.current = target;
@@ -546,7 +594,7 @@ export default function Home() {
 
   useEffect(() => {
     crossMasters();
-  }, [activeMaster, outputMuted]);
+  }, [fade, outputMuted]);
 
   useEffect(() => {
     updateStemGains();
@@ -639,68 +687,72 @@ export default function Home() {
   ];
 
   const masters = [
-    { id: "oldMaster", mask: BRAND.maskOriginal, title: "The old master of The Phantom of the Opera", label: "1986 original" },
-    { id: "newMaster", mask: BRAND.maskRemaster, title: "The new remaster of The Phantom of the Opera", label: "2026 remaster" },
+    { id: "oldMaster", mask: BRAND.maskOriginal, label: "1986 original" },
+    { id: "newMaster", mask: BRAND.maskRemaster, label: "2026 remaster" },
   ] as const;
 
   return (
-    <div className="bg-[#00060f] text-white" style={{ backgroundImage: `linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
-      <header className="sticky top-0 z-50 border-b border-white/15 bg-[#00060f]/94 backdrop-blur-xl">
+    <div id="top" className="bg-[#00060f] text-white" style={{ backgroundImage: `linear-gradient(260deg, #000, transparent 35%, transparent 65%, #000), linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
+      <header className="sticky top-0 z-50 border-b border-[#3b4154] bg-[#00040a] bg-[linear-gradient(#00060f,transparent_76%)]">
         <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
-          <div className="flex h-[86px] items-center justify-between gap-4 sm:gap-8">
-            <a href="#top" onClick={scrollToTarget} aria-label="The Phantom of the Opera" className="block shrink-0">
-              <Wordmark className="h-auto w-[148px] sm:w-[232px]" textClassName="text-[13px] sm:text-[17px]" />
+          <div className="relative flex h-[71px] items-center justify-between gap-4 md:h-[81px] lg:h-[110px]">
+            <a href="#top" onClick={scrollToTarget} aria-label="The Phantom of the Opera" className="block shrink-0 lg:absolute lg:left-1/2 lg:-translate-x-1/2">
+              <Wordmark className="h-auto w-[116px] min-[480px]:w-[152px] sm:w-[174px] md:w-[199px] lg:w-[273px]" />
             </a>
-            <a href="https://ticketing.lwtheatres.co.uk/event/121/" target="_blank" rel="noreferrer" className="bg-gradient-to-r from-[#6a99ab] to-[#a5bed3] px-3 py-2.5 text-[9px] font-medium uppercase tracking-[0.12em] text-[#00060f] transition-opacity hover:opacity-90 sm:px-5 sm:py-3 sm:text-[11px] sm:tracking-[0.16em]">
-              London Tickets
-            </a>
+            {/* Links out of the page are left out inside a frame, where they would repeat the host page's navigation. */}
+            {!embedded && (
+              <a href="https://ticketing.lwtheatres.co.uk/event/121/" target="_blank" rel="noreferrer" className="ml-auto whitespace-nowrap rounded-[5.6px] border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] px-[16px] py-[8.8px] text-[14px] leading-[1.5] uppercase tracking-[0.2em] text-[#00060f] transition-opacity hover:opacity-90 max-[379px]:px-[12px] max-[379px]:text-[12px] max-[379px]:tracking-[0.12em] min-[480px]:px-[22px] lg:px-[33px] min-[90rem]:px-[42px] min-[90rem]:py-[11.2px]">
+                London Tickets
+              </a>
+            )}
           </div>
-          <nav className="hidden h-11 items-center justify-center gap-8 border-t border-white/10 text-[11px] uppercase tracking-[0.13em] text-white/90 md:flex">
+        </div>
+        {!embedded && (
+          <nav className="hidden h-[60px] items-center justify-center gap-12 border-t border-[rgba(238,224,202,0.1)] text-[13.44px] uppercase tracking-[0.1em] text-white lg:flex">
             {navLinks.map(([label, href]) => (
               <a key={label} href={href} target="_blank" rel="noreferrer" className="transition-colors hover:text-[#a5bed3]">{label}</a>
             ))}
           </nav>
-        </div>
+        )}
       </header>
 
-      <main id="top">
+      <main>
         <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
-          <p className="mb-5 text-[11px] uppercase tracking-[0.24em] text-[#a5bed3]">The original London production</p>
-          <h1 className="text-[42px] font-light uppercase leading-[0.95] tracking-[0.08em] text-[#a5bed3] sm:text-[66px]">The Original Cast Recording</h1>
-          <h2 className="mt-3 text-[13px] font-light uppercase tracking-[0.24em] text-white sm:text-[16px]">Like You&apos;ve Never Heard Before</h2>
-          <p className="font-detail mt-8 max-w-[620px] text-[15px] leading-7 text-white/72">
-            Hear The Phantom of the Opera in two ways: compare the original and new masters, then scroll down to explore the new remaster as eight synchronized stems.
+          <p className="mb-5 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">The original London production</p>
+          <h1 className="section-heading">The Original Cast Recording</h1>
+          <h2 className="divider-heading mt-3">Like You&apos;ve Never Heard Before</h2>
+          <p className="mt-8 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">
+            Hear The Phantom of the Opera in two ways: compare the original and new masters, then scroll down to explore the new remaster as eight synchronised stems.
           </p>
-          <a href="#masters" onClick={scrollToTarget} className="mt-10 flex flex-col items-center gap-2 text-[10px] uppercase tracking-[0.17em] text-[#a5bed3]">
+          <a href="#masters" onClick={scrollToTarget} className="mt-10 flex flex-col items-center gap-2 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">
             Begin listening <ArrowDown className="h-4 w-4" />
           </a>
         </section>
 
-        <section id="masters" className="scroll-mt-32 border-y border-white/14 bg-[#00060f]/44 py-20 sm:py-28">
+        <section id="masters" className="scroll-mt-[90px] border-y border-[#3b4154] bg-[#00060f]/44 py-20 sm:py-28 lg:scroll-mt-[190px]">
           <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
             <div className="mb-12 max-w-[700px]">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-[#a5bed3]">01 — Masters A / B</p>
-              <h2 className="mt-4 text-[36px] font-light leading-tight tracking-[-0.02em] sm:text-[52px]">One performance. Two mixes.</h2>
-              <p className="font-detail mt-5 max-w-[620px] text-[15px] leading-7 text-white/65">Press play once, then switch between the original master and the new remaster at any moment. Both files run from the same sample-accurate audio clock.</p>
+              <h2 className="section-heading">One performance. Two mixes.</h2>
+              <p className="mt-5 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play once, then switch between the original master and the new remaster at any moment.</p>
             </div>
 
             {/* Nothing downloads until a visitor reaches for the comparison. */}
-            <div ref={masterCardRef} onPointerEnter={loadMastersOnIntent} onFocus={loadMastersOnIntent} className="border border-[#a5bed3]/25 bg-[#020a15]/80 p-5 shadow-[0_30px_80px_rgba(0,0,0,.28)] sm:p-9">
-              <div className="flex items-center justify-between gap-5 border-b border-white/12 pb-5">
+            <div ref={masterCardRef} onPointerEnter={loadMastersOnIntent} onFocus={loadMastersOnIntent} className="border border-[#3b4154] bg-black/30 p-5 shadow-[0_18px_18px_rgba(0,0,0,.3)] sm:p-9">
+              <div className="flex items-center justify-between gap-5 border-b border-[#3b4154] pb-5">
                 <div className="flex min-w-0 items-center gap-4">
                   {/* The icon swaps to a spinner the moment a pointer arrives and loading starts; icons that
                       ignore the pointer keep that swap from swallowing the first tap. */}
-                  <button onClick={toggleMasters} aria-busy={masterLoad === "loading"} aria-label={wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#a5bed3] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
+                  <button onClick={toggleMasters} aria-busy={masterLoad === "loading"} aria-label={wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
                     {masterLoad === "loading" ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
                   </button>
                   <div className="min-w-0">
-                    <p className="truncate text-[14px] font-medium">The Phantom of the Opera</p>
-                    <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[#a5bed3]">Master comparison {masterLoad === "ready" ? "• Ready" : masterLoad === "loading" ? "• Loading" : ""}</p>
+                    <p className="truncate text-[13.44px] uppercase tracking-[0.1em]">The Phantom of the Opera</p>
+                    {masterLoad === "loading" && <p className="mt-1 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3]">Loading</p>}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 text-[12px] tabular-nums text-[#a5bed3]">
+                <div className="flex items-center gap-3 text-[13.44px] tabular-nums text-[#a5bed3]">
                   <button onClick={() => seekMasters(0)} aria-label="Restart master comparison" className="transition-colors hover:text-white"><RotateCcw className="h-4 w-4" /></button>
-                  <span>{formatTime(masterTime)}</span><span className="text-white/25">/</span><span>{formatTime(MASTER_DURATION)}</span>
+                  <span>{formatTime(masterTime)}</span><span className="text-[#6a99ab]">/</span><span>{formatTime(MASTER_DURATION)}</span>
                 </div>
               </div>
 
@@ -720,68 +772,114 @@ export default function Home() {
                 <WaveBars peaks={trackPeaks.new_master} progress={masterProgress} />
               </div>
 
-              <fieldset className="mt-8 min-w-0 border-t border-white/12 pt-8">
+              <fieldset className="mt-8 min-w-0 border-t border-[#3b4154] pt-8">
                 <legend className="sr-only">Choose which master you hear</legend>
-                <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-4 text-[11px] sm:gap-8">
+                <div className="grid grid-cols-2 items-start gap-4 text-[12px] sm:gap-8">
                   {masters.map((master, index) => {
-                    const active = activeMaster === master.id;
+                    // How much of this side is in the mix: the masks light in proportion to the crossfade.
+                    const lit = master.id === "oldMaster" ? 1 - fade : fade;
                     return (
-                      <label key={master.id} className={`group block cursor-pointer ${index === 0 ? "col-start-1" : "col-start-3 text-right"} row-start-1`}>
-                        <input type="radio" name="master" value={master.id} checked={active} onChange={() => setActiveMaster(master.id)} className="peer sr-only" />
+                      <label key={master.id} className={`group block cursor-pointer ${index === 1 ? "text-right" : ""}`}>
+                        <input type="radio" name="master" value={master.id} checked={lit === 1} onChange={() => setFade(master.id === "oldMaster" ? 0 : 1)} className="peer sr-only" />
                         {/* The masks sit on black. Screen blending lets the page show through it, the
                             slight contrast lift takes the photo's near-black noise to true black first,
                             and the clip trims the grey pixel edges the source files carry. */}
                         <img
                           src={master.mask}
                           alt=""
-                          className={`mx-auto block aspect-square w-full max-w-[240px] contrast-[1.08] mix-blend-screen transition-opacity duration-300 [clip-path:inset(1px)] ${active ? "opacity-100" : "opacity-30 group-hover:opacity-55"}`}
+                          style={{ "--lit": 0.3 + 0.7 * lit } as CSSProperties}
+                          className={`mx-auto block aspect-square w-full max-w-[240px] contrast-[1.08] mix-blend-screen opacity-(--lit) [clip-path:inset(1px)] group-hover:opacity-[max(0.55,var(--lit))] ${fadeDragging ? "" : "transition-opacity duration-300"}`}
                         />
-                        <span className="mt-3 block outline-offset-4 peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-[#a5bed3]">
-                          <span className={`block transition-colors ${active ? "text-white" : "text-white/55"}`}>{master.title}</span>
-                          <span className={`mt-1 block uppercase tracking-[0.12em] ${active ? "text-[#a5bed3]" : "text-white/42"}`}>{master.label}</span>
-                        </span>
+                        <span className={`mt-3 block uppercase tracking-[0.1em] outline-offset-4 transition-colors peer-focus-visible:outline peer-focus-visible:outline-1 peer-focus-visible:outline-[#a5bed3] ${lit >= 0.5 ? "text-[#a5bed3]" : "text-[#6a99ab]"}`}>{master.label}</span>
                       </label>
                     );
                   })}
-                  <p className="col-start-2 row-start-1 self-center pb-0.5 text-center uppercase tracking-[0.15em] text-[#a5bed3]">A / B</p>
+                </div>
+
+                {/* Dragging moves the mix relative to where it was, never jumping to the pointer, and
+                    scales a narrow frame's travel up so a small drag is always a small change. */}
+                <div
+                  role="slider"
+                  tabIndex={0}
+                  aria-label="Crossfade between the 1986 original and the 2026 remaster"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(fade * 100)}
+                  aria-valuetext={fade === 0 ? "1986 original only" : fade === 1 ? "2026 remaster only" : `${100 - Math.round(fade * 100)}% 1986 original, ${Math.round(fade * 100)}% 2026 remaster`}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0 || fadeDragRef.current) return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    fadeDragRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, from: fade, started: false };
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = fadeDragRef.current;
+                    if (drag?.pointer !== event.pointerId) return;
+                    const dx = event.clientX - drag.x;
+                    if (!drag.started) {
+                      if (Math.abs(dx) < FADE_SLOP_PX || Math.abs(dx) < Math.abs(event.clientY - drag.y)) return;
+                      drag.started = true;
+                      drag.x = event.clientX;
+                      setFadeDragging(true);
+                      return;
+                    }
+                    setFade(Math.min(1, Math.max(0, drag.from + dx / Math.max(FADE_TRAVEL_PX, event.currentTarget.clientWidth - 56))));
+                  }}
+                  onPointerUp={releaseFade}
+                  onPointerCancel={releaseFade}
+                  onKeyDown={(event) => {
+                    const step = ({ ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, Home: -20, End: 20 } as Record<string, number | undefined>)[event.key];
+                    if (step === undefined) return;
+                    event.preventDefault();
+                    setFade(Math.min(20, Math.max(0, Math.round(fade * 20) + step)) / 20);
+                  }}
+                  className={`group/fade relative mt-6 h-12 touch-pan-y select-none focus-visible:outline-none ${fadeDragging ? "cursor-grabbing" : "cursor-grab"}`}>
+                  <span className="absolute inset-x-[28px] top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[#3b4154]" />
+                  <span className="absolute left-1/2 top-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 bg-[#6a99ab]" />
+                  <span
+                    style={{ left: `calc(${fade} * (100% - 56px))` }}
+                    className={`absolute top-1/2 grid h-8 w-[56px] -translate-y-1/2 place-items-center rounded-[5.6px] border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] outline-offset-4 group-focus-visible/fade:outline group-focus-visible/fade:outline-1 group-focus-visible/fade:outline-[#a5bed3] ${fadeDragging ? "shadow-[0_0_0_8px_rgba(165,190,211,.22)]" : "shadow-[0_0_0_4px_rgba(165,190,211,.14)] transition-[left] duration-300"}`}>
+                    <span className="h-4 w-px bg-[#00060f]/45" />
+                  </span>
                 </div>
               </fieldset>
             </div>
           </div>
         </section>
 
-        <section id="stems" ref={stemsSectionRef} className="relative scroll-mt-28 py-20 sm:py-28">
+        <section id="stems" ref={stemsSectionRef} className="relative scroll-mt-[90px] py-20 sm:py-28 lg:scroll-mt-[190px]">
           <div ref={stemsApproachRef} aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-[200px] h-px" />
           <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
             <div className="mb-10 flex flex-col justify-between gap-7 sm:flex-row sm:items-end">
               <div className="max-w-[700px]">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-[#a5bed3]">02 — New remaster stems</p>
-                <h2 className="mt-4 text-[36px] font-light leading-tight tracking-[-0.02em] sm:text-[52px]">Inside the new mix.</h2>
-                <p className="font-detail mt-5 max-w-[640px] text-[15px] leading-7 text-white/65">Every stem starts together on one clock. Press play on any row to hear the complete arrangement, then solo, mute or rebalance individual parts without timing drift.</p>
+                <h2 className="section-heading">Inside the new mix.</h2>
+                <p className="mt-5 max-w-[640px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play on any row to hear the complete arrangement, then solo, mute or rebalance individual parts.</p>
               </div>
               <div className="flex items-center gap-3">
-                <button onClick={() => { setStemMute(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemSolo(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemVolume(Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86]))); }} className="text-[10px] uppercase tracking-[0.16em] text-[#a5bed3] hover:text-white">Reset mix</button>
+                <button onClick={() => { setStemMute(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemSolo(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemVolume(Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86]))); }} className="text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3] hover:text-white">Reset mix</button>
               </div>
             </div>
 
-            <div ref={stemListRef} className="border-t border-[#a5bed3]/30 bg-[#00060f]/30">
+            <div ref={stemListRef} className="border-t border-[#3b4154] bg-[#00060f]/30">
               {STEMS.map((stem) => {
                 const anySolo = Object.values(stemSolo).some(Boolean);
                 const audible = !stemMute[stem.id] && (!anySolo || stemSolo[stem.id]);
+                // A row is pending until its own stem decodes. Until the stems are asked to play, a pending
+                // row's play button does nothing; once they are, it works like any other row, and its stem
+                // joins the others the moment it decodes.
+                const pending = stemLoad === "loading" && !stemReady[stem.id];
+                const starting = stemLoad === "loading" && wanted === "stems" && !stemsPlaying;
+                const inert = pending && wanted !== "stems";
                 // Below 768px a row takes two lines: play, name and waveform above; solo,
                 // mute and a level slider wide enough to set by touch below. Both layouts
                 // keep the source order, so tabbing follows the screen at any width.
                 return (
-                  <article key={stem.id} className={`grid grid-cols-[44px_104px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-white/12 py-3 transition-opacity md:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto_auto] md:gap-x-5 md:gap-y-0 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
-                    <button onClick={toggleStems} aria-busy={stemLoad === "loading"} aria-label={`${wanted === "stems" ? "Pause" : "Play"} all stems from ${stem.name} row`} className="relative grid h-9 w-9 place-items-center rounded-full border border-[#a5bed3]/45 text-[#a5bed3] transition-colors *:pointer-events-none before:absolute before:-inset-[5px] before:content-[''] hover:border-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f]">
-                      {stemLoad === "loading" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
+                  <article key={stem.id} className={`grid grid-cols-[44px_104px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-[#3b4154] py-3 transition-opacity md:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto_auto] md:gap-x-5 md:gap-y-0 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
+                    <button onClick={inert ? undefined : toggleStems} aria-disabled={inert} aria-busy={pending || starting} aria-label={inert ? `${stem.name} still loading` : `${wanted === "stems" ? "Pause" : "Play"} all stems from ${stem.name} row`} className={`relative grid h-9 w-9 place-items-center rounded-full border transition-colors *:pointer-events-none before:absolute before:-inset-[5px] before:content-[''] ${inert ? "cursor-default border-[#3b4154] text-[#6a99ab]" : "border-[#a5bed3] bg-[rgba(42,75,90,.38)] text-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f]"}`}>
+                      {pending || starting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
                     </button>
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] text-white">{stem.name}</p>
-                      <p className="mt-1 text-[9px] uppercase tracking-[0.15em] text-[#7798ac]">{stem.group}</p>
-                    </div>
+                    <p className="min-w-0 text-[12.8px] uppercase leading-[1.4] tracking-[0.06em] md:truncate">{stem.name}</p>
                     <div
-                      className="relative h-[38px] min-w-0 cursor-pointer before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-['']"
+                      className={`relative h-[38px] min-w-0 cursor-pointer transition-opacity before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-[''] ${pending ? "opacity-40" : ""}`}
                       role="slider"
                       tabIndex={0}
                       aria-label={`${stem.name} playback position`}
@@ -807,9 +905,12 @@ export default function Home() {
               })}
             </div>
 
-            <div className="mt-5 flex flex-col justify-between gap-4 text-[10px] uppercase tracking-[0.14em] text-[#7798ac] sm:flex-row sm:items-center">
-              <span>{formatTime(stemsTime)} / {formatTime(STEM_DURATION)} • {stemLoad === "loading" ? "Loading stems" : "8 stems synchronized"}</span>
-              <button onClick={() => setOutputMuted((value) => !value)} className="flex items-center gap-2 text-[#a5bed3] hover:text-white" aria-label={outputMuted ? "Unmute all audio" : "Mute all audio"}>
+            <div className="mt-5 flex flex-col justify-between gap-4 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] sm:flex-row sm:items-center">
+              <span className="tabular-nums">
+                {formatTime(stemsTime)} / {formatTime(STEM_DURATION)}
+                <span role="status">{stemLoad === "loading" ? ` • Loading stems • ${Object.keys(stemReady).length} of ${STEMS.length} ready` : stemLoad === "ready" ? <span className="sr-only">All stems ready</span> : ""}</span>
+              </span>
+              <button onClick={() => setOutputMuted((value) => !value)} className="flex items-center gap-2 text-[13.44px] text-[#a5bed3] hover:text-white" aria-label={outputMuted ? "Unmute all audio" : "Mute all audio"}>
                 {outputMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />} {outputMuted ? "Output muted" : "Output active"}
               </button>
             </div>
@@ -817,10 +918,9 @@ export default function Home() {
         </section>
       </main>
 
-      <footer className="border-t border-white/14 bg-[#00060f]/72 py-9">
-        <div className="mx-auto flex max-w-[1240px] flex-col items-center justify-between gap-5 px-5 text-center sm:flex-row sm:px-8 sm:text-left">
-          <Wordmark className="w-[180px] opacity-85" textClassName="text-[15px]" />
-          <p className="text-[9px] uppercase tracking-[0.14em] text-white/38">London audio archive mockup • Masters A/B • Grouped stems</p>
+      <footer className="border-t border-[#3b4154] bg-[#00040a] bg-[linear-gradient(transparent,#0b0f23)] py-9">
+        <div className="mx-auto flex max-w-[1240px] justify-center px-5 sm:px-8">
+          <Wordmark className="h-auto w-[180px]" />
         </div>
       </footer>
     </div>

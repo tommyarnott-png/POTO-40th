@@ -3,9 +3,10 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * The official site's faces, self-hosted from public/fonts (SIL Open Font
- * License, text alongside): Jost for headings, labels and controls, Montserrat
- * for running text. Latin and Latin Extended subsets, one variable file each.
+ * Jost, the official site's face for headings, navigation and controls, used here
+ * for everything, body copy included. Self-hosted from public/fonts (SIL Open
+ * Font License, text alongside): Latin and Latin Extended subsets, one variable
+ * file each.
  */
 @font-face {
   font-family: "Jost";
@@ -22,24 +23,6 @@
   font-weight: 300 600;
   font-display: swap;
   src: url("/fonts/jost-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-@font-face {
-  font-family: "Montserrat";
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("/fonts/montserrat-latin-ext.woff2") format("woff2");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-
-@font-face {
-  font-family: "Montserrat";
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("/fonts/montserrat-latin.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -114,8 +97,47 @@
   }
 }
 
-.font-detail {
-  font-family: "Montserrat", sans-serif;
+/*
+ * The official London page's two heading treatments, from its computed styles
+ * at its own breakpoints (480, 768 and 992px): capitals with wide tracking, the
+ * main heading filled with the site's blue gradient. docs/brand-assets-provenance.md
+ * records the measurements.
+ */
+.section-heading {
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #a5bed3;
+  background-image: linear-gradient(27deg, #6a99ab, #a5bed3);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.divider-heading {
+  font-size: calc(16px + 0.1vw);
+  font-weight: 300;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+@media (min-width: 480px) {
+  .section-heading { font-size: 30px; }
+  .divider-heading { font-size: calc(18px + 0.1vw); }
+}
+
+@media (min-width: 768px) {
+  .section-heading { font-size: calc(18px + 1vw); }
+  .divider-heading { letter-spacing: 0.2em; }
+}
+
+@media (min-width: 992px) {
+  .section-heading { line-height: 0.9; }
+  .divider-heading { font-size: calc(20px + 0.1vw); letter-spacing: 0.15em; }
 }
 
 /*
@@ -132,13 +154,13 @@ input[type="range"] {
 input[type="range"]::-webkit-slider-runnable-track {
   height: 3px;
   border-radius: 99px;
-  background: rgba(165, 190, 211, 0.25);
+  background: #3b4154;
 }
 
 input[type="range"]::-moz-range-track {
   height: 3px;
   border-radius: 99px;
-  background: rgba(165, 190, 211, 0.25);
+  background: #3b4154;
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -148,7 +170,7 @@ input[type="range"]::-webkit-slider-thumb {
   height: 18px;
   margin-top: -7.5px;
   border-radius: 9999px;
-  background: #edf5f9;
+  background: #a5bed3;
   border: 1px solid #a5bed3;
   box-shadow: 0 0 0 4px rgba(165, 190, 211, 0.14);
 }
@@ -157,7 +179,7 @@ input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: #edf5f9;
+  background: #a5bed3;
   border: 1px solid #a5bed3;
   box-shadow: 0 0 0 4px rgba(165, 190, 211, 0.14);
 }
@@ -169,9 +191,10 @@ input[type="range"]::-moz-range-thumb {
   width: 2rem;
   height: 2rem;
   place-items: center;
-  border: 1px solid rgba(165, 190, 211, 0.25);
-  color: #7798ac;
-  font-size: 10px;
+  border: 1px solid #3b4154;
+  border-radius: 5.6px;
+  color: #a5bed3;
+  font-size: 12px;
   transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
 }
 
@@ -188,7 +211,7 @@ input[type="range"]::-moz-range-thumb {
 
 .stem-button.active {
   border-color: #a5bed3;
-  background: #a5bed3;
+  background: linear-gradient(72deg, #6a99ab, #a5bed3);
   color: #00060f;
 }
 

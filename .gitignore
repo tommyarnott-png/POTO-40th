@@ -14,10 +14,12 @@ dist/
 public/audio/source/
 GroupedStems-ForWebsite.zip
 
-# The official production logo is not redistributed here; the A/B masks and the
-# page background are. See docs/ASSETS.md.
+# Only the images the page uses are committed: the production wordmark, the A/B
+# masks and the page background. See docs/ASSETS.md.
 public/images/*
 !public/images/.gitkeep
+!public/images/phantom-wordmark-white.avif
+!public/images/phantom-wordmark-white.png
 !public/images/mask-original.png
 !public/images/mask-remaster.png
 !public/images/smoke-bg.jpg

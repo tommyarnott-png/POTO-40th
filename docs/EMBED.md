@@ -12,7 +12,7 @@ Whenever its height changes, and once more after fonts and images have loaded,
 the page posts this to `window.parent`:
 
 ```js
-{ type: "poto-40th:height", height: 3278 }
+{ type: "poto-40th:height", height: 2954 }
 ```
 
 The message is a type string and a number, nothing else. It is sent with an open
@@ -32,7 +32,7 @@ In Webflow, put this in an Embed element where the player should appear. Change
   title="The Phantom of the Opera: the original cast recording, masters A/B and stems"
   allow="autoplay"
   loading="lazy"
-  style="display:block;width:100%;height:3300px;border:0"
+  style="display:block;width:100%;height:3000px;border:0"
 ></iframe>
 
 <script>
@@ -54,8 +54,8 @@ In Webflow, put this in an Embed element where the player should appear. Change
 - **`allow="autoplay"`** lets the frame start audio. Playback still only begins
   when the visitor presses play, but without it some browsers block Web Audio in
   a cross-origin frame.
-- **The starting height** (3300px) is roughly the page's height in a 340–700px
-  column: measured at 3,221–3,353px. The frame corrects it within a moment of
+- **The starting height** (3000px) is roughly the page's height in a 340–700px
+  column: measured at 2,943–3,156px. The frame corrects it within a moment of
   loading, larger or smaller.
 - **`loading="lazy"`** defers the frame until it is near the viewport. Remove it
   if the player sits at the top of the page.
@@ -63,8 +63,8 @@ In Webflow, put this in an Embed element where the player should appear. Change
 ## Layout inside a frame
 
 - **Width:** checked in a 340px frame and at 360px, 390px, 700px and 768px, with
-  no horizontal scrolling. Narrower than about 330px the typeset wordmark in the
-  header overflows by a few pixels. Below 768px each stem row takes two lines,
+  no horizontal scrolling. Narrower than 320px the page holds its 320px minimum
+  width and scrolls sideways. Below 768px each stem row takes two lines,
   keeping its level slider.
 - **Header and links:** the page's sticky header does not stick inside a frame,
   because the frame is as tall as its content and the parent page does the
@@ -73,3 +73,16 @@ In Webflow, put this in an Embed element where the player should appear. Change
 - **Background:** the smoke background is fixed to the viewport, so inside a
   full-height frame — and on iOS, which does not support fixed backgrounds — it
   stretches over the whole page and looks softer.
+
+## Search engines
+
+Staging is kept out of search results by a `noindex, nofollow` rule, sent both
+as an `X-Robots-Tag` header on every response (`public/_headers`) and as a meta
+tag in `index.html`. `public/robots.txt` deliberately allows all crawling: a
+crawler that is told not to fetch a page never reads its noindex rule, and can
+still list the bare URL if another site links to it.
+
+Revisit all three when the site goes public. If the standalone page should
+appear in search, remove the header and the meta tag; if only the official
+page embedding it should, keep them. Either way the allow-all `robots.txt` is
+intentional, not an oversight.

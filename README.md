@@ -36,9 +36,9 @@ in git — the grouped-stem archive alone is 220MB, past GitHub's 100MB per-file
 limit. See [docs/ASSETS.md](docs/ASSETS.md) for where the sources live and how
 to regenerate the playback audio.
 
-The official production logo is not redistributed here. The page falls back to
-a typeset wordmark without it, so it still renders correctly — drop it in per
-`docs/ASSETS.md` before deploying publicly.
+The official production wordmark (`public/images/phantom-wordmark-white.avif`
+and `.png`), the A/B masks and the page background are committed too; see
+`docs/ASSETS.md`.
 
 ## Layout
 
@@ -47,7 +47,8 @@ src/
   assets.ts              asset paths, durations, master-alignment constants
   data/trackPeaks.json   generated waveform envelopes
   pages/Home.tsx         both players and the whole page
-  embed.ts               reports the page height to an embedding frame
+  audioLoader.ts         fetches, decodes, holds and releases a set of tracks
+  embed.ts               whether the page is framed; reports its height to the frame
   components/            error boundary
 tools/
   generate-peaks.mjs     regenerates trackPeaks.json from the playback audio

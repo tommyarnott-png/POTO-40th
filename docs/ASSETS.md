@@ -54,16 +54,18 @@ variables at the top of the script.
 | `public/images/mask-original.png` | White plaster half-mask, 887 × 887 — the A/B switch's 1986 side | Yes |
 | `public/images/mask-remaster.png` | Chrome half-mask, 887 × 887 — the A/B switch's 2026 side | Yes |
 | `public/images/smoke-bg.jpg` | Dark smoke page background, 1920 × 1080 | Yes |
-| `public/images/phantom-logo-white.png` | White production logo, 500 × 151 | No |
+| `public/images/phantom-wordmark-white.avif` | White production wordmark, 1092 × 330, from the official site's CDN, scaled down from 6543 × 1980 | Yes |
+| `public/images/phantom-wordmark-white.png` | The same wordmark as PNG, for browsers without AVIF | Yes |
 
-The masks and the background were supplied for this page and are committed; the
-repo is public, so they are published with it. The production logo is still not
-redistributed: drop it in at that path and the page picks it up, and without it
-the header and footer fall back to a typeset wordmark. The masks sit on pure
-black, which the page blends away so they read against its own background.
+All four are committed; the repo is private. The masks and the background were
+supplied for this page, and the wordmark comes from the official site. There is
+no typeset fallback: if the wordmark files go missing, the header and footer show
+a broken image. The masks sit on pure black, which the page blends away so they
+read against its own background.
 
-The official faces, Jost and Montserrat, are self-hosted from `public/fonts`
-under the SIL Open Font License, with the licence text alongside.
+Jost, the official site's heading face, is self-hosted from `public/fonts` under
+the SIL Open Font License, with the licence text alongside, and sets all of the
+page's text.
 
 See [brand-assets-provenance.md](brand-assets-provenance.md) for where the logo
 came from on the official site, the palette, and the typefaces. Note that the

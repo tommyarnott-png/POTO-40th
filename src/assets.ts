@@ -7,12 +7,10 @@
  * in the repo, so plain static paths are enough.
  */
 
-/**
- * Brand artwork. The masks and the smoke background are committed; the
- * production logo is not — see docs/ASSETS.md before deploying.
- */
+/** Brand artwork, all committed; see docs/ASSETS.md. */
 export const BRAND = {
-  logo: "/images/phantom-logo-white.png",
+  logo: "/images/phantom-wordmark-white.png",
+  logoAvif: "/images/phantom-wordmark-white.avif",
   background: "/images/smoke-bg.jpg",
   maskOriginal: "/images/mask-original.png",
   maskRemaster: "/images/mask-remaster.png",

@@ -8,7 +8,10 @@
  */
 const MESSAGE_TYPE = "poto-40th:height";
 
-if (window.parent !== window) {
+/** Whether the page is inside another page's frame, where the host supplies its own navigation. */
+export const embedded = window.parent !== window;
+
+if (embedded) {
   let reported = 0;
 
   // The body rather than the document element: the root's scroll height never

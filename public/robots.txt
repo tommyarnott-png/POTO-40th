@@ -1,2 +1,5 @@
+# Crawling is allowed on purpose: a crawler has to fetch a page to read its
+# noindex rules (public/_headers and index.html). Revisit before the site goes
+# public; see docs/EMBED.md.
 User-agent: *
-Disallow: /
+Allow: /
