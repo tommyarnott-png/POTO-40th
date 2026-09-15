@@ -29,6 +29,8 @@ export type Stem = {
   name: string;
   group: string;
   file: string;
+  /** Held as one channel: its two channels are the same signal. */
+  mono?: boolean;
 };
 
 export type StemId =
@@ -41,14 +43,18 @@ export type StemId =
   | "perc"
   | "orchestra";
 
-/** Row order here is the order the mixer renders. */
+/**
+ * Row order here is the order the mixer renders. Only the kick is mono: its
+ * source channels are identical and its encoded ones correlate at 0.9998, where
+ * every other stem is genuinely stereo (correlation 0.13–0.89).
+ */
 export const STEMS: Stem[] = [
   { id: "christine_vocal", name: "Christine Vocal", group: "Vocals", file: "/audio/stems/christine_vocal.m4a" },
   { id: "phantom_vocal", name: "Phantom Vocal", group: "Vocals", file: "/audio/stems/phantom_vocal.m4a" },
   { id: "organ", name: "Organ", group: "Keys", file: "/audio/stems/organ.m4a" },
   { id: "guitar", name: "Guitar", group: "Guitar", file: "/audio/stems/guitar.m4a" },
   { id: "bass", name: "Bass", group: "Low End", file: "/audio/stems/bass.m4a" },
-  { id: "kick", name: "Kick", group: "Drums", file: "/audio/stems/kick.m4a" },
+  { id: "kick", name: "Kick", group: "Drums", file: "/audio/stems/kick.m4a", mono: true },
   { id: "perc", name: "Percussion", group: "Drums", file: "/audio/stems/perc.m4a" },
   { id: "orchestra", name: "Orchestra", group: "Orchestra", file: "/audio/stems/orchestra.m4a" },
 ];
@@ -59,6 +65,13 @@ export const STEMS: Stem[] = [
  */
 export const MASTER_DURATION = 104.77;
 export const STEM_DURATION = 104.08;
+
+/**
+ * The rate the player decodes and plays at. The AAC encode leaves nothing above
+ * 17.6kHz in any file (16.8kHz in the stems), so 40kHz keeps all of it with room
+ * for resampling, while holding 17% less decoded audio than a 48kHz device rate.
+ */
+export const PLAYBACK_SAMPLE_RATE = 40000;
 
 /**
  * The 1986 master and the 2026 remaster were cut from different tape transfers,

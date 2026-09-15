@@ -1,0 +1,4 @@
+# Unreleased material: keep every response out of search indexes, including
+# pages a crawler reaches from an outside link despite robots.txt.
+/*
+  X-Robots-Tag: noindex, nofollow

@@ -16,9 +16,12 @@ import {
   OLD_MASTER_PLAYBACK_RATE,
   OLD_MASTER_START_OFFSET,
   PLAYBACK,
+  PLAYBACK_SAMPLE_RATE,
   STEM_DURATION,
   STEMS,
 } from "@/assets";
+import type { StemId } from "@/assets";
+import { createTrackSet } from "@/audioLoader";
 import trackPeaks from "@/data/trackPeaks.json";
 
 function formatTime(value: number) {
@@ -37,12 +40,26 @@ const WAVE_PLAYED = "rgba(220,234,242,.92)";
 const WAVE_UNPLAYED = "rgba(165,190,211,.25)";
 
 /**
- * How long the A/B switch takes to cross from one master to the other. Short
- * enough to feel immediate, long enough that neither gain steps and clicks.
+ * The A/B cut. The two versions' vocals sit up to 43ms apart, so any real
+ * overlap is heard as an echo: the cut lasts 8ms, just long enough not to click,
+ * drawn as an equal-power curve in eight straight segments.
  */
-const CROSSFADE_SECONDS = 0.06;
+const SWITCH_SECONDS = 0.008;
+const SWITCH_STEPS = 8;
+
+/** Pause, seek and start fade the gain this long, so no waveform is cut mid-cycle. */
+const FADE_SECONDS = 0.005;
+const START_DELAY_SECONDS = 0.02;
 
 type MasterId = "oldMaster" | "newMaster";
+type Transport = "masters" | "stems";
+type LoadState = "idle" | "loading" | "ready";
+type Voice = { source: AudioBufferSourceNode; gain: GainNode };
+type Voices = Record<string, Voice>;
+
+function isRunning(voices: Voices) {
+  return Object.keys(voices).length > 0;
+}
 
 /** Tracks the rendered size of an element, and how many bars its width holds. */
 function useBarLayout(ref: RefObject<HTMLElement | null>) {
@@ -195,293 +212,405 @@ function pointerTime(event: ReactPointerEvent<HTMLElement>, duration: number) {
 
 export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null);
-  const decodedBuffersRef = useRef<Record<string, AudioBuffer>>({});
+  const [masterSet] = useState(() => createTrackSet([
+    { id: "oldMaster", file: PLAYBACK.oldMaster },
+    { id: "newMaster", file: PLAYBACK.newMaster },
+  ]));
+  const [stemSet] = useState(() => createTrackSet(STEMS, { trim: true }));
 
-  const masterSourcesRef = useRef<Record<string, AudioBufferSourceNode>>({});
-  const masterGainsRef = useRef<Record<string, GainNode>>({});
+  // What the visitor has asked for, as distinct from what is sounding: the
+  // transport that should be running, and a count every play, pause and seek
+  // advances. A start that waited on a download goes ahead only if nothing has
+  // been asked since, and then reads the side, mix and position as they are now.
+  const wantedRef = useRef<Transport | null>(null);
+  const requestRef = useRef(0);
+
+  const masterVoicesRef = useRef<Voices>({});
   const masterStartedAtRef = useRef(0);
   const masterOffsetRef = useRef(0);
-  const masterPlayingRef = useRef(false);
 
-  const stemSourcesRef = useRef<Record<string, AudioBufferSourceNode>>({});
-  const stemGainsRef = useRef<Record<string, GainNode>>({});
+  const stemVoicesRef = useRef<Voices>({});
   const stemsStartedAtRef = useRef(0);
   const stemsOffsetRef = useRef(0);
-  const stemsPlayingRef = useRef(false);
+
+  // Set when the stems finish loading. The masters are then released as soon as
+  // they are idle and the visitor has left the A/B, once: releasing either set
+  // clears it, so scrolling back and forth past the A/B cannot unload and reload
+  // them repeatedly, nor unload them when the stems are no longer held.
+  const mastersSpareRef = useRef(false);
+  /** The visitor is at the A/B while at least half its card is on screen. */
+  const atMastersRef = useRef(false);
+  const stemsInViewRef = useRef(new Set<Element>());
+  const masterCardRef = useRef<HTMLDivElement>(null);
+  const stemsSectionRef = useRef<HTMLElement>(null);
+  const stemsApproachRef = useRef<HTMLDivElement>(null);
+  const stemListRef = useRef<HTMLDivElement>(null);
 
   const [activeMaster, setActiveMaster] = useState<MasterId>("newMaster");
+  const [wanted, setWanted] = useState<Transport | null>(null);
+  const [masterLoad, setMasterLoad] = useState<LoadState>("idle");
   const [masterTime, setMasterTime] = useState(0);
   const [masterPlaying, setMasterPlaying] = useState(false);
-  const [masterLoading, setMasterLoading] = useState(false);
-  const [masterReady, setMasterReady] = useState(false);
 
+  const [stemLoad, setStemLoad] = useState<LoadState>("idle");
   const [stemsTime, setStemsTime] = useState(0);
   const [stemsPlaying, setStemsPlaying] = useState(false);
-  const [stemsLoading, setStemsLoading] = useState(false);
-  const [stemsReady, setStemsReady] = useState(false);
   const [stemVolume, setStemVolume] = useState<Record<string, number>>(() => Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86])));
   const [stemMute, setStemMute] = useState<Record<string, boolean>>(() => Object.fromEntries(STEMS.map((stem) => [stem.id, false])));
   const [stemSolo, setStemSolo] = useState<Record<string, boolean>>(() => Object.fromEntries(STEMS.map((stem) => [stem.id, false])));
   const [outputMuted, setOutputMuted] = useState(false);
+
+  // The side and mix as last rendered, for audio that starts after an await.
+  const mixRef = useRef({ activeMaster, outputMuted, stemVolume, stemMute, stemSolo });
+  mixRef.current = { activeMaster, outputMuted, stemVolume, stemMute, stemSolo };
 
   const masterProgress = Math.min(100, (masterTime / MASTER_DURATION) * 100);
   const stemProgress = Math.min(100, (stemsTime / STEM_DURATION) * 100);
 
   function getContext() {
     if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContext({ latencyHint: "interactive" });
+      audioContextRef.current = new AudioContext({ latencyHint: "interactive", sampleRate: PLAYBACK_SAMPLE_RATE });
     }
     return audioContextRef.current;
   }
 
-  async function decodeTrack(id: string, url: string) {
-    if (decodedBuffersRef.current[id]) return decodedBuffersRef.current[id];
-    const context = getContext();
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Unable to load ${id}`);
-    const data = await response.arrayBuffer();
-    const buffer = await context.decodeAudioData(data);
-    decodedBuffersRef.current[id] = buffer;
-    return buffer;
+  function setWantedTransport(next: Transport | null) {
+    wantedRef.current = next;
+    setWanted(next);
   }
 
-  async function prepareMasters() {
-    if (masterReady) return;
-    setMasterLoading(true);
-    try {
-      await Promise.all([
-        decodeTrack("oldMaster", PLAYBACK.oldMaster),
-        decodeTrack("newMaster", PLAYBACK.newMaster),
-      ]);
-      setMasterReady(true);
-    } finally {
-      setMasterLoading(false);
-    }
+  function loadMasters() {
+    if (!masterSet.held) setMasterLoad("loading");
+    return masterSet.load().then(
+      (held) => {
+        if (held) setMasterLoad("ready");
+        return held;
+      },
+      (error) => {
+        setMasterLoad("idle");
+        if (wantedRef.current === "masters") setWantedTransport(null);
+        throw error;
+      },
+    );
   }
 
-  async function prepareStems() {
-    if (stemsReady) return;
-    setStemsLoading(true);
-    try {
-      await Promise.all(STEMS.map((stem) => decodeTrack(stem.id, stem.file)));
-      setStemsReady(true);
-    } finally {
-      setStemsLoading(false);
-    }
+  function loadStems() {
+    if (!stemSet.held) setStemLoad("loading");
+    return stemSet.load().then(
+      (held) => {
+        if (held) {
+          setStemLoad("ready");
+          mastersSpareRef.current = true;
+          releaseSpareMasters();
+        }
+        return held;
+      },
+      (error) => {
+        setStemLoad("idle");
+        if (wantedRef.current === "stems") setWantedTransport(null);
+        throw error;
+      },
+    );
   }
 
-  function stopNodes(nodes: Record<string, AudioBufferSourceNode>) {
-    Object.values(nodes).forEach((node) => {
+  function releaseMasters() {
+    mastersSpareRef.current = false;
+    masterSet.release();
+    setMasterLoad("idle");
+  }
+
+  function releaseStems() {
+    mastersSpareRef.current = false;
+    stemSet.release();
+    setStemLoad("idle");
+  }
+
+  function releaseSpareMasters() {
+    if (mastersSpareRef.current && !atMastersRef.current && wantedRef.current !== "masters") releaseMasters();
+  }
+
+  /** A source through its own gain, faded in from its start time. */
+  function createVoice(context: AudioContext, buffer: AudioBuffer, level: number, when: number): Voice {
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    gain.gain.value = 0;
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(level, when + FADE_SECONDS);
+    source.connect(gain).connect(context.destination);
+    source.onended = () => gain.disconnect();
+    return { source, gain };
+  }
+
+  /** Fades voices out and stops them once silent; they stay alive until the fade ends. */
+  function fadeOut(voices: Voices) {
+    const context = audioContextRef.current;
+    if (!context) return;
+    const now = context.currentTime;
+    Object.values(voices).forEach(({ source, gain }) => {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(0, now + FADE_SECONDS);
       try {
-        node.stop();
+        source.stop(now + FADE_SECONDS);
       } catch {
         // The node may already have reached the end.
       }
-      node.disconnect();
     });
   }
 
-  /**
-   * Crosses the two running masters to `nextMaster` with a linear ramp. The
-   * recordings are the same performance, so equal-gain crossfading keeps the
-   * level steady where an equal-power curve would bump it mid-ramp.
-   */
-  function updateMasterGain(nextMaster = activeMaster) {
-    const context = audioContextRef.current;
-    if (!context) return;
-    const baseGain = outputMuted ? 0 : 0.84;
-    const levels: Record<MasterId, number> = {
-      oldMaster: nextMaster === "oldMaster" ? baseGain * OLD_MASTER_GAIN_COMPENSATION : 0,
-      newMaster: nextMaster === "newMaster" ? baseGain : 0,
+  function masterLevels(): Record<MasterId, number> {
+    const { activeMaster: side, outputMuted: muted } = mixRef.current;
+    const level = muted ? 0 : 0.84;
+    return {
+      oldMaster: side === "oldMaster" ? level * OLD_MASTER_GAIN_COMPENSATION : 0,
+      newMaster: side === "newMaster" ? level : 0,
     };
+  }
+
+  /**
+   * Cuts the running masters over to the selected side. The squared gains trade
+   * along a quarter sine, so the level holds across the cut: at 8ms the two
+   * versions are too far apart in time to sum coherently, as a linear fade assumes.
+   */
+  function crossMasters() {
+    const context = audioContextRef.current;
+    const voices = masterVoicesRef.current;
+    if (!context || !isRunning(voices)) return;
     const now = context.currentTime;
+    const notStarted = now < masterStartedAtRef.current;
+    const at = Math.max(now, masterStartedAtRef.current);
+    const levels = masterLevels();
     (["oldMaster", "newMaster"] as const).forEach((id) => {
-      const gain = masterGainsRef.current[id];
-      if (!gain) return;
-      gain.gain.cancelScheduledValues(now);
-      gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.linearRampToValueAtTime(levels[id], now + CROSSFADE_SECONDS);
+      const param = voices[id].gain.gain;
+      const from = notStarted ? 0 : param.value;
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(from, at);
+      for (let step = 1; step <= SWITCH_STEPS; step += 1) {
+        const blend = Math.sin((Math.PI / 2) * (step / SWITCH_STEPS)) ** 2;
+        param.linearRampToValueAtTime(Math.sqrt(from ** 2 * (1 - blend) + levels[id] ** 2 * blend), at + (SWITCH_SECONDS * step) / SWITCH_STEPS);
+      }
     });
+  }
+
+  function stemLevel(id: StemId) {
+    const { outputMuted: muted, stemMute: mute, stemSolo: solo, stemVolume: volume } = mixRef.current;
+    const anySolo = Object.values(solo).some(Boolean);
+    return !muted && !mute[id] && (!anySolo || solo[id]) ? volume[id] ?? 0.86 : 0;
   }
 
   function updateStemGains() {
     const context = audioContextRef.current;
     if (!context) return;
-    const anySolo = Object.values(stemSolo).some(Boolean);
     const now = context.currentTime;
+    const notStarted = now < stemsStartedAtRef.current;
+    const at = Math.max(now, stemsStartedAtRef.current);
     STEMS.forEach((stem) => {
-      const gain = stemGainsRef.current[stem.id];
-      if (!gain) return;
-      const audible = !outputMuted && !stemMute[stem.id] && (!anySolo || stemSolo[stem.id]);
-      const level = audible ? stemVolume[stem.id] ?? 0.86 : 0;
-      gain.gain.cancelScheduledValues(now);
-      gain.gain.setTargetAtTime(level, now, 0.01);
+      const voice = stemVoicesRef.current[stem.id];
+      if (!voice) return;
+      const param = voice.gain.gain;
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(notStarted ? 0 : param.value, at);
+      param.setTargetAtTime(stemLevel(stem.id), at, 0.01);
     });
   }
 
-  async function startMasters(offset = masterTime) {
-    pauseStems();
-    await prepareMasters();
-    const context = getContext();
-    await context.resume();
-    stopNodes(masterSourcesRef.current);
-    masterSourcesRef.current = {};
-    masterGainsRef.current = {};
-
-    const when = context.currentTime + 0.02;
-    const safeOffset = Math.min(offset, MASTER_DURATION - 0.02);
-    (["oldMaster", "newMaster"] as const).forEach((id) => {
-      const source = context.createBufferSource();
-      const gain = context.createGain();
-      source.buffer = decodedBuffersRef.current[id];
-      if (id === "oldMaster") source.playbackRate.value = OLD_MASTER_PLAYBACK_RATE;
-      gain.gain.value = 0;
-      source.connect(gain).connect(context.destination);
-      const bufferOffset = id === "oldMaster"
-        ? OLD_MASTER_START_OFFSET + safeOffset * OLD_MASTER_PLAYBACK_RATE
-        : safeOffset;
-      source.start(when, bufferOffset);
-      masterSourcesRef.current[id] = source;
-      masterGainsRef.current[id] = gain;
-    });
-
-    masterOffsetRef.current = safeOffset;
-    masterStartedAtRef.current = when;
-    masterPlayingRef.current = true;
-    setMasterPlaying(true);
-    updateMasterGain(activeMaster);
-  }
-
-  function pauseMasters() {
-    if (masterPlayingRef.current && audioContextRef.current) {
-      const elapsed = Math.max(0, audioContextRef.current.currentTime - masterStartedAtRef.current);
-      const nextTime = Math.min(MASTER_DURATION, masterOffsetRef.current + elapsed);
-      masterOffsetRef.current = nextTime;
-      setMasterTime(nextTime);
+  function stopMasters() {
+    const context = audioContextRef.current;
+    if (context && isRunning(masterVoicesRef.current)) {
+      const position = Math.min(MASTER_DURATION, masterOffsetRef.current + Math.max(0, context.currentTime - masterStartedAtRef.current));
+      masterOffsetRef.current = position;
+      setMasterTime(position);
     }
-    stopNodes(masterSourcesRef.current);
-    masterSourcesRef.current = {};
-    masterGainsRef.current = {};
-    masterPlayingRef.current = false;
+    fadeOut(masterVoicesRef.current);
+    masterVoicesRef.current = {};
     setMasterPlaying(false);
   }
 
-  async function toggleMasters() {
-    if (masterPlayingRef.current) pauseMasters();
-    else await startMasters(masterTime >= MASTER_DURATION ? 0 : masterTime);
-  }
-
-  async function seekMasters(nextTime: number) {
-    const target = Math.min(MASTER_DURATION, Math.max(0, nextTime));
-    const wasPlaying = masterPlayingRef.current;
-    if (wasPlaying) {
-      stopNodes(masterSourcesRef.current);
-      masterSourcesRef.current = {};
-      masterGainsRef.current = {};
-      masterPlayingRef.current = false;
-      setMasterPlaying(false);
+  function stopStems() {
+    const context = audioContextRef.current;
+    if (context && isRunning(stemVoicesRef.current)) {
+      const position = Math.min(STEM_DURATION, stemsOffsetRef.current + Math.max(0, context.currentTime - stemsStartedAtRef.current));
+      stemsOffsetRef.current = position;
+      setStemsTime(position);
     }
-    setMasterTime(target);
-    masterOffsetRef.current = target;
-    if (wasPlaying) await startMasters(target);
-  }
-
-  async function startStems(offset = stemsTime) {
-    pauseMasters();
-    await prepareStems();
-    const context = getContext();
-    await context.resume();
-    stopNodes(stemSourcesRef.current);
-    stemSourcesRef.current = {};
-    stemGainsRef.current = {};
-
-    const when = context.currentTime + 0.02;
-    const safeOffset = Math.min(offset, STEM_DURATION - 0.02);
-    STEMS.forEach((stem) => {
-      const source = context.createBufferSource();
-      const gain = context.createGain();
-      source.buffer = decodedBuffersRef.current[stem.id];
-      gain.gain.value = 0;
-      source.connect(gain).connect(context.destination);
-      source.start(when, safeOffset);
-      stemSourcesRef.current[stem.id] = source;
-      stemGainsRef.current[stem.id] = gain;
-    });
-
-    stemsOffsetRef.current = safeOffset;
-    stemsStartedAtRef.current = when;
-    stemsPlayingRef.current = true;
-    setStemsPlaying(true);
-    updateStemGains();
-  }
-
-  function pauseStems() {
-    if (stemsPlayingRef.current && audioContextRef.current) {
-      const elapsed = Math.max(0, audioContextRef.current.currentTime - stemsStartedAtRef.current);
-      const nextTime = Math.min(STEM_DURATION, stemsOffsetRef.current + elapsed);
-      stemsOffsetRef.current = nextTime;
-      setStemsTime(nextTime);
-    }
-    stopNodes(stemSourcesRef.current);
-    stemSourcesRef.current = {};
-    stemGainsRef.current = {};
-    stemsPlayingRef.current = false;
+    fadeOut(stemVoicesRef.current);
+    stemVoicesRef.current = {};
     setStemsPlaying(false);
   }
 
-  async function toggleStems() {
-    if (stemsPlayingRef.current) pauseStems();
-    else await startStems(stemsTime >= STEM_DURATION ? 0 : stemsTime);
+  async function requestMasters(offset: number) {
+    const request = ++requestRef.current;
+    // Resumed before any await: iOS only lets audio start inside the tap itself.
+    const context = getContext();
+    const resumed = context.resume();
+    setWantedTransport("masters");
+    stopStems();
+    masterOffsetRef.current = offset;
+    setMasterTime(offset);
+
+    const held = await loadMasters();
+    await resumed;
+    if (request !== requestRef.current || !held) return;
+
+    const when = context.currentTime + START_DELAY_SECONDS;
+    const position = Math.min(masterOffsetRef.current, MASTER_DURATION - 0.02);
+    const levels = masterLevels();
+    const oldMaster = createVoice(context, held.oldMaster.buffer, levels.oldMaster, when);
+    oldMaster.source.playbackRate.value = OLD_MASTER_PLAYBACK_RATE;
+    oldMaster.source.start(when, OLD_MASTER_START_OFFSET + position * OLD_MASTER_PLAYBACK_RATE);
+    const newMaster = createVoice(context, held.newMaster.buffer, levels.newMaster, when);
+    newMaster.source.start(when, position);
+
+    masterVoicesRef.current = { oldMaster, newMaster };
+    masterOffsetRef.current = position;
+    masterStartedAtRef.current = when;
+    setMasterPlaying(true);
+    releaseStems();
   }
 
-  async function seekStems(nextTime: number) {
+  async function requestStems(offset: number) {
+    const request = ++requestRef.current;
+    const context = getContext();
+    const resumed = context.resume();
+    setWantedTransport("stems");
+    stopMasters();
+    stemsOffsetRef.current = offset;
+    setStemsTime(offset);
+
+    const held = await loadStems();
+    await resumed;
+    if (request !== requestRef.current || !held) return;
+
+    const when = context.currentTime + START_DELAY_SECONDS;
+    const position = Math.min(stemsOffsetRef.current, STEM_DURATION - 0.02);
+    stemVoicesRef.current = Object.fromEntries(STEMS.map((stem) => {
+      const { buffer, start } = held[stem.id];
+      const voice = createVoice(context, buffer, stemLevel(stem.id), when);
+      // A stem's leading silence isn't held, so it enters at its place on the shared clock.
+      voice.source.start(when + Math.max(0, start - position), Math.max(0, position - start));
+      return [stem.id, voice];
+    }));
+
+    stemsOffsetRef.current = position;
+    stemsStartedAtRef.current = when;
+    setStemsPlaying(true);
+    releaseMasters();
+  }
+
+  function pauseMasters() {
+    requestRef.current += 1;
+    setWantedTransport(null);
+    stopMasters();
+    releaseSpareMasters();
+    preloadStems();
+  }
+
+  function pauseStems() {
+    requestRef.current += 1;
+    setWantedTransport(null);
+    stopStems();
+  }
+
+  function toggleMasters() {
+    if (wantedRef.current === "masters") pauseMasters();
+    else void requestMasters(masterOffsetRef.current >= MASTER_DURATION ? 0 : masterOffsetRef.current);
+  }
+
+  function toggleStems() {
+    if (wantedRef.current === "stems") pauseStems();
+    else void requestStems(stemsOffsetRef.current >= STEM_DURATION ? 0 : stemsOffsetRef.current);
+  }
+
+  function seekMasters(nextTime: number) {
+    const target = Math.min(MASTER_DURATION, Math.max(0, nextTime));
+    masterOffsetRef.current = target;
+    setMasterTime(target);
+    if (wantedRef.current !== "masters") return;
+    fadeOut(masterVoicesRef.current);
+    masterVoicesRef.current = {};
+    setMasterPlaying(false);
+    void requestMasters(target);
+  }
+
+  function seekStems(nextTime: number) {
     const target = Math.min(STEM_DURATION, Math.max(0, nextTime));
-    const wasPlaying = stemsPlayingRef.current;
-    if (wasPlaying) {
-      stopNodes(stemSourcesRef.current);
-      stemSourcesRef.current = {};
-      stemGainsRef.current = {};
-      stemsPlayingRef.current = false;
-      setStemsPlaying(false);
-    }
-    setStemsTime(target);
     stemsOffsetRef.current = target;
-    if (wasPlaying) await startStems(target);
+    setStemsTime(target);
+    if (wantedRef.current !== "stems") return;
+    fadeOut(stemVoicesRef.current);
+    stemVoicesRef.current = {};
+    setStemsPlaying(false);
+    void requestStems(target);
   }
 
-  // Also runs as playback starts, so a switch made while the masters were still
-  // loading is the one that plays.
   useEffect(() => {
-    updateMasterGain(activeMaster);
-  }, [activeMaster, outputMuted, masterPlaying]);
+    crossMasters();
+  }, [activeMaster, outputMuted]);
 
-  // Likewise, so solo, mute and levels set while the stems were loading apply.
   useEffect(() => {
     updateStemGains();
-  }, [stemVolume, stemMute, stemSolo, outputMuted, stemsPlaying]);
+  }, [stemVolume, stemMute, stemSolo, outputMuted]);
+
+  /** Loading prompted by where the visitor is rather than a press waits while the other transport plays, so the two sets aren't held together. */
+  function loadMastersOnIntent() {
+    if (wantedRef.current !== "stems") void loadMasters();
+  }
+
+  /**
+   * Loads the stems once their section is near, unless the visitor is still with
+   * the masters: at the A/B, or playing them. Starting the masters releases the
+   * stems, so a load then would only be thrown away. On a phone the whole A/B
+   * card fits on screen with the stems marker below it, so where the visitor is
+   * decides this, not whether they have touched the card yet.
+   */
+  function preloadStems() {
+    if (stemsInViewRef.current.size > 0 && !stemSet.held && !atMastersRef.current && wantedRef.current !== "masters") void loadStems();
+  }
+
+  // The marker watched sits 200px above the stems section because a frame on
+  // another origin ignores rootMargin; the section and the rows are watched too,
+  // for a visitor who arrives directly. The A/B card is watched to know when the
+  // visitor has moved on from the masters.
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.target === masterCardRef.current) atMastersRef.current = entry.intersectionRatio >= 0.5;
+        else if (entry.isIntersecting) stemsInViewRef.current.add(entry.target);
+        else stemsInViewRef.current.delete(entry.target);
+      });
+      releaseSpareMasters();
+      preloadStems();
+    }, { threshold: [0, 0.5] });
+    [masterCardRef, stemsApproachRef, stemsSectionRef, stemListRef].forEach((ref) => observer.observe(ref.current!));
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let frame = 0;
     const tick = () => {
       const context = audioContextRef.current;
-      if (context && masterPlayingRef.current) {
+      if (context && isRunning(masterVoicesRef.current)) {
         const value = masterOffsetRef.current + Math.max(0, context.currentTime - masterStartedAtRef.current);
         if (value >= MASTER_DURATION) {
-          stopNodes(masterSourcesRef.current);
-          masterSourcesRef.current = {};
-          masterPlayingRef.current = false;
+          fadeOut(masterVoicesRef.current);
+          masterVoicesRef.current = {};
+          masterOffsetRef.current = MASTER_DURATION;
+          setWantedTransport(null);
           setMasterPlaying(false);
           setMasterTime(MASTER_DURATION);
+          preloadStems();
         } else {
           setMasterTime(value);
         }
       }
-      if (context && stemsPlayingRef.current) {
+      if (context && isRunning(stemVoicesRef.current)) {
         const value = stemsOffsetRef.current + Math.max(0, context.currentTime - stemsStartedAtRef.current);
         if (value >= STEM_DURATION) {
-          stopNodes(stemSourcesRef.current);
-          stemSourcesRef.current = {};
-          stemsPlayingRef.current = false;
+          fadeOut(stemVoicesRef.current);
+          stemVoicesRef.current = {};
+          stemsOffsetRef.current = STEM_DURATION;
+          setWantedTransport(null);
           setStemsPlaying(false);
           setStemsTime(STEM_DURATION);
         } else {
@@ -496,8 +625,6 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
-      stopNodes(masterSourcesRef.current);
-      stopNodes(stemSourcesRef.current);
       audioContextRef.current?.close();
     };
   }, []);
@@ -557,15 +684,18 @@ export default function Home() {
               <p className="font-detail mt-5 max-w-[620px] text-[15px] leading-7 text-white/65">Press play once, then switch between the original master and the new remaster at any moment. Both files run from the same sample-accurate audio clock.</p>
             </div>
 
-            <div className="border border-[#a5bed3]/25 bg-[#020a15]/80 p-5 shadow-[0_30px_80px_rgba(0,0,0,.28)] sm:p-9">
+            {/* Nothing downloads until a visitor reaches for the comparison. */}
+            <div ref={masterCardRef} onPointerEnter={loadMastersOnIntent} onFocus={loadMastersOnIntent} className="border border-[#a5bed3]/25 bg-[#020a15]/80 p-5 shadow-[0_30px_80px_rgba(0,0,0,.28)] sm:p-9">
               <div className="flex items-center justify-between gap-5 border-b border-white/12 pb-5">
                 <div className="flex min-w-0 items-center gap-4">
-                  <button onClick={toggleMasters} disabled={masterLoading} aria-label={masterPlaying ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#a5bed3] text-[#00060f] transition-transform active:scale-95 disabled:cursor-wait disabled:opacity-70">
-                    {masterLoading ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
+                  {/* The icon swaps to a spinner the moment a pointer arrives and loading starts; icons that
+                      ignore the pointer keep that swap from swallowing the first tap. */}
+                  <button onClick={toggleMasters} aria-busy={masterLoad === "loading"} aria-label={wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#a5bed3] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
+                    {masterLoad === "loading" ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
                   </button>
                   <div className="min-w-0">
                     <p className="truncate text-[14px] font-medium">The Phantom of the Opera</p>
-                    <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[#a5bed3]">Master comparison {masterReady ? "• Ready" : ""}</p>
+                    <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[#a5bed3]">Master comparison {masterLoad === "ready" ? "• Ready" : masterLoad === "loading" ? "• Loading" : ""}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-[12px] tabular-nums text-[#a5bed3]">
@@ -620,7 +750,8 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="stems" className="scroll-mt-28 py-20 sm:py-28">
+        <section id="stems" ref={stemsSectionRef} className="relative scroll-mt-28 py-20 sm:py-28">
+          <div ref={stemsApproachRef} aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-[200px] h-px" />
           <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
             <div className="mb-10 flex flex-col justify-between gap-7 sm:flex-row sm:items-end">
               <div className="max-w-[700px]">
@@ -633,14 +764,17 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="border-t border-[#a5bed3]/30 bg-[#00060f]/30">
+            <div ref={stemListRef} className="border-t border-[#a5bed3]/30 bg-[#00060f]/30">
               {STEMS.map((stem) => {
                 const anySolo = Object.values(stemSolo).some(Boolean);
                 const audible = !stemMute[stem.id] && (!anySolo || stemSolo[stem.id]);
+                // Below 768px a row takes two lines: play, name and waveform above; solo,
+                // mute and a level slider wide enough to set by touch below. Both layouts
+                // keep the source order, so tabbing follows the screen at any width.
                 return (
-                  <article key={stem.id} className={`grid grid-cols-[38px_minmax(84px,120px)_minmax(54px,1fr)_auto] items-center gap-2 border-b border-white/12 py-4 transition-opacity sm:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto] sm:gap-5 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
-                    <button onClick={toggleStems} disabled={stemsLoading} aria-label={`${stemsPlaying ? "Pause" : "Play"} all stems from ${stem.name} row`} className="relative grid h-9 w-9 place-items-center rounded-full border border-[#a5bed3]/45 text-[#a5bed3] transition-colors before:absolute before:-inset-[5px] before:content-[''] hover:border-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f] disabled:cursor-wait">
-                      {stemsLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
+                  <article key={stem.id} className={`grid grid-cols-[44px_104px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-white/12 py-3 transition-opacity md:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto_auto] md:gap-x-5 md:gap-y-0 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
+                    <button onClick={toggleStems} aria-busy={stemLoad === "loading"} aria-label={`${wanted === "stems" ? "Pause" : "Play"} all stems from ${stem.name} row`} className="relative grid h-9 w-9 place-items-center rounded-full border border-[#a5bed3]/45 text-[#a5bed3] transition-colors *:pointer-events-none before:absolute before:-inset-[5px] before:content-[''] hover:border-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f]">
+                      {stemLoad === "loading" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
                     </button>
                     <div className="min-w-0">
                       <p className="truncate text-[13px] text-white">{stem.name}</p>
@@ -661,10 +795,12 @@ export default function Home() {
                       }}>
                       <WaveBars peaks={trackPeaks.stems[stem.id]} progress={stemProgress} />
                     </div>
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => setStemSolo((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemSolo[stem.id] ? "active" : ""}`} aria-label={`Solo ${stem.name}`}>S</button>
-                      <button onClick={() => setStemMute((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemMute[stem.id] ? "active" : ""}`} aria-label={`Mute ${stem.name}`}>M</button>
-                      <input aria-label={`${stem.name} volume`} type="range" min="0" max="1" step="0.01" value={stemVolume[stem.id]} onChange={(event) => setStemVolume((previous) => ({ ...previous, [stem.id]: Number(event.target.value) }))} className="hidden w-28 cursor-pointer md:block lg:w-32" />
+                    <div className="col-span-3 flex items-center gap-4 md:contents">
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setStemSolo((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemSolo[stem.id] ? "active" : ""}`} aria-label={`Solo ${stem.name}`}>S</button>
+                        <button onClick={() => setStemMute((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemMute[stem.id] ? "active" : ""}`} aria-label={`Mute ${stem.name}`}>M</button>
+                      </div>
+                      <input aria-label={`${stem.name} volume`} type="range" min="0" max="1" step="0.01" value={stemVolume[stem.id]} onChange={(event) => setStemVolume((previous) => ({ ...previous, [stem.id]: Number(event.target.value) }))} className="min-w-0 flex-1 cursor-pointer md:w-28 lg:w-32" />
                     </div>
                   </article>
                 );
@@ -672,7 +808,7 @@ export default function Home() {
             </div>
 
             <div className="mt-5 flex flex-col justify-between gap-4 text-[10px] uppercase tracking-[0.14em] text-[#7798ac] sm:flex-row sm:items-center">
-              <span>{formatTime(stemsTime)} / {formatTime(STEM_DURATION)} • 8 stems synchronized</span>
+              <span>{formatTime(stemsTime)} / {formatTime(STEM_DURATION)} • {stemLoad === "loading" ? "Loading stems" : "8 stems synchronized"}</span>
               <button onClick={() => setOutputMuted((value) => !value)} className="flex items-center gap-2 text-[#a5bed3] hover:text-white" aria-label={outputMuted ? "Unmute all audio" : "Mute all audio"}>
                 {outputMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />} {outputMuted ? "Output muted" : "Output active"}
               </button>

@@ -12,7 +12,7 @@ Whenever its height changes, and once more after fonts and images have loaded,
 the page posts this to `window.parent`:
 
 ```js
-{ type: "poto-40th:height", height: 2926 }
+{ type: "poto-40th:height", height: 3278 }
 ```
 
 The message is a type string and a number, nothing else. It is sent with an open
@@ -32,7 +32,7 @@ In Webflow, put this in an Embed element where the player should appear. Change
   title="The Phantom of the Opera: the original cast recording, masters A/B and stems"
   allow="autoplay"
   loading="lazy"
-  style="display:block;width:100%;height:2900px;border:0"
+  style="display:block;width:100%;height:3300px;border:0"
 ></iframe>
 
 <script>
@@ -54,16 +54,18 @@ In Webflow, put this in an Embed element where the player should appear. Change
 - **`allow="autoplay"`** lets the frame start audio. Playback still only begins
   when the visitor presses play, but without it some browsers block Web Audio in
   a cross-origin frame.
-- **The starting height** (2900px) is roughly the page's height in a 360–700px
-  column. The frame corrects it within a moment of loading, larger or smaller.
+- **The starting height** (3300px) is roughly the page's height in a 340–700px
+  column: measured at 3,221–3,353px. The frame corrects it within a moment of
+  loading, larger or smaller.
 - **`loading="lazy"`** defers the frame until it is near the viewport. Remove it
   if the player sits at the top of the page.
 
 ## Layout inside a frame
 
-- **Width:** checked at 360px and 700px, with no horizontal scrolling at either.
-  Narrower than about 330px the typeset wordmark in the header overflows by a few
-  pixels. Below 768px the per-stem level sliders are hidden; solo and mute remain.
+- **Width:** checked in a 340px frame and at 360px, 390px, 700px and 768px, with
+  no horizontal scrolling. Narrower than about 330px the typeset wordmark in the
+  header overflows by a few pixels. Below 768px each stem row takes two lines,
+  keeping its level slider.
 - **Header and links:** the page's sticky header does not stick inside a frame,
   because the frame is as tall as its content and the parent page does the
   scrolling. The in-page links ("Begin listening", the wordmark) scroll the
