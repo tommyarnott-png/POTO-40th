@@ -30,6 +30,9 @@ import { createTrackSet } from "@/audioLoader";
 import trackPeaks from "@/data/trackPeaks.json";
 import { MIX_FILENAME, exportMix } from "@/mixExport";
 import type { ExportStage } from "@/mixExport";
+import SignupModal, { submitSignup } from "@/components/SignupModal";
+import type { SignupDetails } from "@/components/SignupModal";
+import type { DownloadKind } from "@/consent";
 
 function formatTime(value: number) {
   const seconds = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -264,8 +267,16 @@ export default function Home() {
   const [exportStage, setExportStage] = useState<ExportStage | null>(null);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportNote, setExportNote] = useState<string | null>(null);
-  /** Held as a ref as well, so a second press in the same tick cannot start a second render. */
-  const exportingRef = useRef(false);
+  /** Which download is waiting on the form, and where on the page to put the dialog. */
+  const [gate, setGate] = useState<{ download: DownloadKind; anchorTop: number; pageHeight: number } | null>(null);
+  /** What the visitor gave, kept for this session so the second download needn't ask again. */
+  const signupRef = useRef<SignupDetails | null>(null);
+  const [packStage, setPackStage] = useState<"sending" | "fetching" | null>(null);
+  const [packNote, setPackNote] = useState<string | null>(null);
+  /** Whichever download is in flight, so neither can start twice or start over the other. */
+  const [busy, setBusy] = useState<DownloadKind | null>(null);
+  /** Held as a ref as well, so a second press in the same tick cannot start a second run. */
+  const busyRef = useRef(false);
 
   // The side and mix as last rendered, for audio that starts after an await.
   const mixRef = useRef({ fade, outputMuted, stemVolume, stemMute, stemSolo });
@@ -584,11 +595,9 @@ export default function Home() {
    * Only offered once every stem has decoded. A mix quietly missing a part would
    * be a worse thing to hand someone than no file at all.
    */
-  async function downloadMix() {
+  async function runExport() {
     const ready = stemSet.held;
-    if (exportingRef.current || !ready) return;
-    exportingRef.current = true;
-    setExportNote(null);
+    if (!ready) return;
 
     const levels = Object.fromEntries(STEMS.map((stem) => [stem.id, mixLevel(stem.id)]));
     const { blob, gain } = await exportMix(ready, levels, (stage, progress) => {
@@ -611,7 +620,93 @@ export default function Home() {
     // Anything that would read as "0.0dB down" is not worth saying.
     const reduction = -20 * Math.log10(gain);
     setExportNote(reduction >= 0.05 ? `Saved, ${reduction.toFixed(1)}dB down so it doesn't clip` : "Saved");
-    exportingRef.current = false;
+  }
+
+  /** Confirms the archive is there before starting it, so a refusal is not saved as a file of JSON. */
+  async function fetchPack(token: string) {
+    const address = `/api/download?token=${encodeURIComponent(token)}`;
+    setPackStage("fetching");
+    const checked = await fetch(address, { method: "HEAD" }).catch(() => null);
+    if (!checked || !checked.ok) {
+      setPackStage(null);
+      setPackNote(checked?.status === 404
+        ? "The stem pack isn't ready to download yet."
+        : "That download couldn't be authorised. Please try again.");
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = address;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setPackStage(null);
+    setPackNote("Downloading");
+  }
+
+  /**
+   * Both offers come through the same form and neither is reachable without it. A
+   * visitor who has already given their details is not asked again: the page sends
+   * what they gave with the other download named, which records that they took
+   * that one too and returns a fresh authorisation, the previous one being good
+   * for minutes only.
+   */
+  function requestDownload(download: DownloadKind, trigger: HTMLElement) {
+    if (busyRef.current) return;
+    const details = signupRef.current;
+    if (!details) {
+      // The page's height is taken now, before the dialog is in it, so the dialog
+      // can keep itself inside it. Growing the document would move the height
+      // posted to the host frame and make its iframe jump under the visitor.
+      setGate({
+        download,
+        anchorTop: trigger.getBoundingClientRect().top + window.scrollY - 24,
+        pageHeight: document.body.scrollHeight,
+      });
+      return;
+    }
+    void start(download, details);
+  }
+
+  async function start(download: DownloadKind, details: SignupDetails) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(download);
+    if (download === "stem-pack") {
+      setPackNote(null);
+      setPackStage("sending");
+    } else {
+      setExportNote(null);
+    }
+
+    const result = await submitSignup(details, download);
+    if ("error" in result) {
+      if (download === "stem-pack") {
+        setPackStage(null);
+        setPackNote(result.error);
+      } else {
+        setExportNote(result.error);
+      }
+    } else if (download === "mix") {
+      await runExport();
+    } else {
+      await fetchPack(result.token);
+    }
+
+    busyRef.current = false;
+    setBusy(null);
+  }
+
+  /** The form has already posted and been answered; this only spends what it returned. */
+  async function afterSignup(details: SignupDetails, token: string, download: DownloadKind) {
+    signupRef.current = details;
+    setGate(null);
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(download);
+    if (download === "mix") await runExport();
+    else await fetchPack(token);
+    busyRef.current = false;
+    setBusy(null);
   }
 
   function seekMasters(nextTime: number) {
@@ -741,7 +836,8 @@ export default function Home() {
 
   return (
     // The host page supplies the logo and navigation above the page, so it opens with room for them rather than a header of its own.
-    <div className="bg-[#00060f] pt-15 text-white" style={{ backgroundImage: `linear-gradient(260deg, #000, transparent 35%, transparent 65%, #000), linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
+    // Positioned so the gate can sit absolutely over the page without lengthening it.
+    <div className="relative bg-[#00060f] pt-15 text-white" style={{ backgroundImage: `linear-gradient(260deg, #000, transparent 35%, transparent 65%, #000), linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
       <main>
         <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
           <p className="mb-5 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">The original London production</p>
@@ -958,6 +1054,30 @@ export default function Home() {
               </button>
             </div>
 
+            {/* The source material, beside the section that plays it. The mix below is the
+                visitor's own version of the same recording, so each says what it gives
+                rather than leaving two similar buttons to be told apart. */}
+            <div className="mt-6 flex flex-col gap-4 border-t border-[#3b4154] pt-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[13.44px] uppercase tracking-[0.1em]">The stems themselves</p>
+                <p role="status" className="mt-1 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3]">
+                  {packStage === "sending"
+                    ? "Sending your details"
+                    : packStage === "fetching"
+                      ? "Starting your download"
+                      : packNote ?? "All eight parts, as the studio recorded them"}
+                </p>
+              </div>
+              <button
+                onClick={(event) => requestDownload("stem-pack", event.currentTarget)}
+                disabled={busy !== null}
+                aria-busy={busy === "stem-pack"}
+                className="flex shrink-0 items-center justify-center gap-2 rounded-[5.6px] border border-[#a5bed3] px-[22px] py-[11px] text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3] transition-colors hover:bg-[#a5bed3] hover:text-[#00060f] disabled:cursor-default disabled:border-[#3b4154] disabled:bg-transparent disabled:text-[#6a99ab]">
+                {busy === "stem-pack" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Get the stem pack
+              </button>
+            </div>
+
             {/* Beside the faders, since they are what it renders. The status line carries the
                 stage and the bar carries the position, so a screen reader is told the export
                 has started and finished without being read a new percentage every block. */}
@@ -984,9 +1104,9 @@ export default function Home() {
                 )}
               </div>
               <button
-                onClick={() => void downloadMix()}
-                disabled={stemLoad !== "ready" || exportStage !== null}
-                aria-busy={exportStage !== null}
+                onClick={(event) => requestDownload("mix", event.currentTarget)}
+                disabled={stemLoad !== "ready" || busy !== null}
+                aria-busy={busy === "mix"}
                 className="flex shrink-0 items-center justify-center gap-2 rounded-[5.6px] border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] px-[22px] py-[11px] text-[13.44px] uppercase tracking-[0.1em] text-[#00060f] transition-opacity hover:opacity-90 disabled:cursor-default disabled:border-[#3b4154] disabled:bg-none disabled:bg-[rgba(42,75,90,.38)] disabled:text-[#6a99ab]">
                 {exportStage ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {exportStage === "encoding" ? `Encoding ${Math.round(exportProgress * 100)}%` : "Download your mix"}
@@ -995,6 +1115,16 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      {gate && (
+        <SignupModal
+          download={gate.download}
+          anchorTop={gate.anchorTop}
+          pageHeight={gate.pageHeight}
+          onClose={() => setGate(null)}
+          onComplete={(details, token) => void afterSignup(details, token, gate.download)}
+        />
+      )}
     </div>
   );
 }

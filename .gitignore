@@ -5,6 +5,9 @@ dist/
 .env
 .env.*
 !.env.example
+# Worker secrets for `wrangler dev`. Never committed.
+.dev.vars
+.dev.vars.*
 
 # Full-resolution source audio is never committed: the grouped-stem archive
 # alone is 220MB, past GitHub's 100MB per-file limit. See docs/ASSETS.md.

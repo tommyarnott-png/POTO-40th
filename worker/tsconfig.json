@@ -1,0 +1,11 @@
+{
+  // The Worker is checked on its own so the runtime's globals and the page's DOM
+  // globals never share a program: both declare Request and Response, differently.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["."]
+}

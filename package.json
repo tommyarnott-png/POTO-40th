@@ -6,9 +6,9 @@
   "description": "The Phantom of the Opera 40th — masters A/B comparison and synchronised stem player",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
     "peaks": "node tools/generate-peaks.mjs",
     "deploy": "npm run build && npx wrangler@4 deploy"
   },

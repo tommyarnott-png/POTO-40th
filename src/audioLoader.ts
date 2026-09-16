@@ -112,9 +112,21 @@ export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { tri
         // that fails keeps what it decoded, and nothing of it is still running
         // once it settles, so loading again cannot land a track twice.
         failed = false;
-        const request: Promise<HeldTracks | null> = fetchAndDecode(generation).finally(() => {
-          if (pending === request) pending = null;
-        });
+        const expected = generation;
+        const request: Promise<HeldTracks | null> = fetchAndDecode(expected)
+          // Only the per-track failures settle inside fetchAndDecode. Anything
+          // thrown around them — the decoder's own constructor, for one — would
+          // otherwise reject out of here into callers that start a load without
+          // waiting on it, where it surfaces as an unhandled rejection and the
+          // visitor is told nothing. It reads as the failure the player already
+          // shows, unless the set was released while it ran.
+          .catch(() => {
+            if (expected === generation) failed = true;
+            return null;
+          })
+          .finally(() => {
+            if (pending === request) pending = null;
+          });
         pending = request;
       }
       return pending;
