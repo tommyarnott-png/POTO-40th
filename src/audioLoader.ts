@@ -7,7 +7,8 @@
  * tab. So a set decodes at PLAYBACK_SAMPLE_RATE, one track at a time, keeps
  * mono tracks as one channel and, when asked to, leaves out each track's
  * leading and trailing silence. A set can be released and loaded again; a load
- * still running when its set is released is thrown away.
+ * still running when its set is released is thrown away. A track that fails to
+ * load leaves the rest to finish, and loading again fetches only what is missing.
  */
 import { PLAYBACK_SAMPLE_RATE } from "@/assets";
 
@@ -57,6 +58,7 @@ function hold(context: BaseAudioContext, decoded: AudioBuffer, track: Track, tri
 export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { trim?: boolean; onTrack?: (id: string) => void } = {}) {
   let held: HeldTracks | null = null;
   let ready: HeldTracks = {};
+  let failed = false;
   let pending: Promise<HeldTracks | null> | null = null;
   let generation = 0;
 
@@ -66,20 +68,26 @@ export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { tri
     // file's own rate as well as the player's.
     const decoder = new OfflineAudioContext(1, 1, PLAYBACK_SAMPLE_RATE);
     let decoding = Promise.resolve();
-    await Promise.all(tracks.map(async (track) => {
+    const results = await Promise.allSettled(tracks.filter((track) => !ready[track.id]).map(async (track) => {
       const response = await fetch(track.file);
       if (!response.ok) throw new Error(`Unable to load ${track.id}`);
       const file = await response.arrayBuffer();
-      decoding = decoding.then(async () => {
+      const decode = decoding.then(async () => {
         if (expected !== generation) return;
         const decoded = hold(decoder, await decoder.decodeAudioData(file), track, trim);
         if (expected !== generation) return;
         ready[track.id] = decoded;
         onTrack?.(track.id);
       });
-      await decoding;
+      // A file that will not decode fails its own track, not the ones queued behind it.
+      decoding = decode.catch(() => {});
+      await decode;
     }));
     if (expected !== generation) return null;
+    if (results.some((result) => result.status === "rejected")) {
+      failed = true;
+      return null;
+    }
     held = ready;
     return held;
   }
@@ -92,24 +100,21 @@ export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { tri
     get ready() {
       return ready;
     },
+    /** Whether the last load finished with tracks missing. Its promise resolves to null, as a released load's does. */
+    get failed() {
+      return failed;
+    },
     load() {
       if (held) return Promise.resolve(held);
       if (!pending) {
-        const expected = generation;
         // A released load comes to nothing whether it succeeds or fails, so a
         // late failure can't disturb whatever has been asked for since. A load
-        // that fails drops what it had decoded, and decodes still queued behind
-        // the failure come to nothing too.
-        const request: Promise<HeldTracks | null> = fetchAndDecode(expected)
-          .catch((error) => {
-            if (expected !== generation) return null;
-            generation += 1;
-            ready = {};
-            throw error;
-          })
-          .finally(() => {
-            if (pending === request) pending = null;
-          });
+        // that fails keeps what it decoded, and nothing of it is still running
+        // once it settles, so loading again cannot land a track twice.
+        failed = false;
+        const request: Promise<HeldTracks | null> = fetchAndDecode(generation).finally(() => {
+          if (pending === request) pending = null;
+        });
         pending = request;
       }
       return pending;
@@ -118,6 +123,7 @@ export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { tri
       generation += 1;
       held = null;
       ready = {};
+      failed = false;
       pending = null;
     },
   };

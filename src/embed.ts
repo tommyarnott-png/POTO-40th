@@ -1,15 +1,15 @@
 /**
  * Reports the page's height to the frame embedding it, so a cross-origin iframe
- * can size itself to the content (see docs/EMBED.md). The message carries a type
- * string and a number and nothing else.
+ * can size itself to the content (see docs/EMBED.md). The message is the one the
+ * host page's listener expects, a type string and a number and nothing else.
  *
  * The target origin is left open: the parent is a Phantom domain whose origin is
  * not yet known, so checking where the message came from is the parent's job.
  */
-const MESSAGE_TYPE = "poto-40th:height";
+const MESSAGE_TYPE = "resize-iframe";
 
 /** Whether the page is inside another page's frame, where the host supplies its own navigation. */
-export const embedded = window.parent !== window;
+const embedded = window.parent !== window;
 
 if (embedded) {
   let reported = 0;

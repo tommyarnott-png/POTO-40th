@@ -5,6 +5,7 @@ import {
   LoaderCircle,
   Pause,
   Play,
+  RefreshCw,
   RotateCcw,
   Volume2,
   VolumeX,
@@ -23,7 +24,6 @@ import {
 import type { StemId } from "@/assets";
 import { createTrackSet } from "@/audioLoader";
 import trackPeaks from "@/data/trackPeaks.json";
-import { embedded } from "@/embed";
 
 function formatTime(value: number) {
   const seconds = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -63,7 +63,7 @@ const FADE_TRAVEL_PX = 400;
 
 type MasterId = "oldMaster" | "newMaster";
 type Transport = "masters" | "stems";
-type LoadState = "idle" | "loading" | "ready";
+type LoadState = "idle" | "loading" | "ready" | "failed";
 type Voice = { source: AudioBufferSourceNode; gain: GainNode; when: number };
 type Voices = Record<string, Voice>;
 
@@ -176,16 +176,6 @@ function WaveBars({ peaks, progress }: { peaks: number[]; progress: number }) {
   );
 }
 
-/** The official white wordmark, as AVIF where the browser takes it and PNG where it does not. */
-function Wordmark({ className }: { className?: string }) {
-  return (
-    <picture>
-      <source srcSet={BRAND.logoAvif} type="image/avif" />
-      <img src={BRAND.logo} alt="Andrew Lloyd Webber's The Phantom of the Opera" width={1092} height={330} className={className} />
-    </picture>
-  );
-}
-
 /**
  * In-page links scroll with scrollIntoView rather than fragment navigation.
  * Embedded in an auto-height frame the page has nothing of its own to scroll,
@@ -264,6 +254,7 @@ export default function Home() {
 
   const masterProgress = Math.min(100, (masterTime / MASTER_DURATION) * 100);
   const stemProgress = Math.min(100, (stemsTime / STEM_DURATION) * 100);
+  const stemsReady = Object.keys(stemReady).length;
 
   function getContext() {
     if (!audioContextRef.current) {
@@ -279,38 +270,30 @@ export default function Home() {
 
   function loadMasters() {
     if (!masterSet.held) setMasterLoad("loading");
-    return masterSet.load().then(
-      (held) => {
-        if (held) setMasterLoad("ready");
-        return held;
-      },
-      (error) => {
-        setMasterLoad("idle");
+    return masterSet.load().then((held) => {
+      if (held) setMasterLoad("ready");
+      else if (masterSet.failed) {
+        setMasterLoad("failed");
         if (wantedRef.current === "masters") setWantedTransport(null);
-        throw error;
-      },
-    );
+      }
+      return held;
+    });
   }
 
   function loadStems() {
     if (!stemSet.held) setStemLoad("loading");
-    return stemSet.load().then(
-      (held) => {
-        if (held) {
-          setStemLoad("ready");
-          mastersSpareRef.current = true;
-          releaseSpareMasters();
-        }
-        return held;
-      },
-      (error) => {
-        setStemLoad("idle");
-        setStemReady({});
-        // Stems may already be sounding, so the transport stops as well as the wait.
-        if (wantedRef.current === "stems") pauseStems();
-        throw error;
-      },
-    );
+    return stemSet.load().then((held) => {
+      if (held) {
+        setStemLoad("ready");
+        mastersSpareRef.current = true;
+        releaseSpareMasters();
+      } else if (stemSet.failed) {
+        setStemLoad("failed");
+        // Stems that did load play on without the rest; with none, the wait to start ends.
+        if (wantedRef.current === "stems" && Object.keys(stemSet.ready).length === 0) pauseStems();
+      }
+      return held;
+    });
   }
 
   function releaseMasters() {
@@ -600,9 +583,12 @@ export default function Home() {
     updateStemGains();
   }, [stemVolume, stemMute, stemSolo, outputMuted]);
 
-  /** Loading prompted by where the visitor is rather than a press waits while the other transport plays, so the two sets aren't held together. */
+  /**
+   * Loading prompted by where the visitor is rather than a press waits while the other transport plays, so the two sets aren't held together.
+   * After a failure it waits for a press too, so moving around the page doesn't retry, and announce the failure, over and over.
+   */
   function loadMastersOnIntent() {
-    if (wantedRef.current !== "stems") void loadMasters();
+    if (wantedRef.current !== "stems" && !masterSet.failed) void loadMasters();
   }
 
   /**
@@ -610,10 +596,11 @@ export default function Home() {
    * the masters: at the A/B, or playing them. Starting the masters releases the
    * stems, so a load then would only be thrown away. On a phone the whole A/B
    * card fits on screen with the stems marker below it, so where the visitor is
-   * decides this, not whether they have touched the card yet.
+   * decides this, not whether they have touched the card yet. After a failure
+   * it waits for a press, as loading the masters does.
    */
   function preloadStems() {
-    if (stemsInViewRef.current.size > 0 && !stemSet.held && !atMastersRef.current && wantedRef.current !== "masters") void loadStems();
+    if (stemsInViewRef.current.size > 0 && !stemSet.held && !stemSet.failed && !atMastersRef.current && wantedRef.current !== "masters") void loadStems();
   }
 
   // The marker watched sits 200px above the stems section because a frame on
@@ -677,45 +664,14 @@ export default function Home() {
     };
   }, []);
 
-  const navLinks = [
-    ["London", "https://www.phantomoftheopera.com/london"],
-    ["Tickets", "https://www.phantomoftheopera.com/london/tickets"],
-    ["Origins", "https://www.phantomoftheopera.com/london/about"],
-    ["Gallery", "https://www.phantomoftheopera.com/london/gallery"],
-    ["Cast & Creative", "https://www.phantomoftheopera.com/london/cast-creative"],
-    ["Merchandise", "https://store.playbill.co.uk/phantom"],
-  ];
-
   const masters = [
     { id: "oldMaster", mask: BRAND.maskOriginal, label: "1986 original" },
     { id: "newMaster", mask: BRAND.maskRemaster, label: "2026 remaster" },
   ] as const;
 
   return (
-    <div id="top" className="bg-[#00060f] text-white" style={{ backgroundImage: `linear-gradient(260deg, #000, transparent 35%, transparent 65%, #000), linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
-      <header className="sticky top-0 z-50 border-b border-[#3b4154] bg-[#00040a] bg-[linear-gradient(#00060f,transparent_76%)]">
-        <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
-          <div className="relative flex h-[71px] items-center justify-between gap-4 md:h-[81px] lg:h-[110px]">
-            <a href="#top" onClick={scrollToTarget} aria-label="The Phantom of the Opera" className="block shrink-0 lg:absolute lg:left-1/2 lg:-translate-x-1/2">
-              <Wordmark className="h-auto w-[116px] min-[480px]:w-[152px] sm:w-[174px] md:w-[199px] lg:w-[273px]" />
-            </a>
-            {/* Links out of the page are left out inside a frame, where they would repeat the host page's navigation. */}
-            {!embedded && (
-              <a href="https://ticketing.lwtheatres.co.uk/event/121/" target="_blank" rel="noreferrer" className="ml-auto whitespace-nowrap rounded-[5.6px] border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] px-[16px] py-[8.8px] text-[14px] leading-[1.5] uppercase tracking-[0.2em] text-[#00060f] transition-opacity hover:opacity-90 max-[379px]:px-[12px] max-[379px]:text-[12px] max-[379px]:tracking-[0.12em] min-[480px]:px-[22px] lg:px-[33px] min-[90rem]:px-[42px] min-[90rem]:py-[11.2px]">
-                London Tickets
-              </a>
-            )}
-          </div>
-        </div>
-        {!embedded && (
-          <nav className="hidden h-[60px] items-center justify-center gap-12 border-t border-[rgba(238,224,202,0.1)] text-[13.44px] uppercase tracking-[0.1em] text-white lg:flex">
-            {navLinks.map(([label, href]) => (
-              <a key={label} href={href} target="_blank" rel="noreferrer" className="transition-colors hover:text-[#a5bed3]">{label}</a>
-            ))}
-          </nav>
-        )}
-      </header>
-
+    // The host page supplies the logo and navigation above the page, so it opens with room for them rather than a header of its own.
+    <div className="bg-[#00060f] pt-15 text-white" style={{ backgroundImage: `linear-gradient(260deg, #000, transparent 35%, transparent 65%, #000), linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
       <main>
         <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
           <p className="mb-5 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">The original London production</p>
@@ -729,7 +685,7 @@ export default function Home() {
           </a>
         </section>
 
-        <section id="masters" className="scroll-mt-[90px] border-y border-[#3b4154] bg-[#00060f]/44 py-20 sm:py-28 lg:scroll-mt-[190px]">
+        <section id="masters" className="border-y border-[#3b4154] bg-[#00060f]/44 py-20 sm:py-28">
           <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
             <div className="mb-12 max-w-[700px]">
               <h2 className="section-heading">One performance. Two mixes.</h2>
@@ -742,12 +698,13 @@ export default function Home() {
                 <div className="flex min-w-0 items-center gap-4">
                   {/* The icon swaps to a spinner the moment a pointer arrives and loading starts; icons that
                       ignore the pointer keep that swap from swallowing the first tap. */}
-                  <button onClick={toggleMasters} aria-busy={masterLoad === "loading"} aria-label={wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
-                    {masterLoad === "loading" ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
+                  <button onClick={masterLoad === "failed" ? () => void loadMasters() : toggleMasters} aria-busy={masterLoad === "loading"} aria-label={masterLoad === "failed" ? "Retry loading the master comparison" : wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
+                    {masterLoad === "loading" ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterLoad === "failed" ? <RefreshCw className="h-5 w-5" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
                   </button>
                   <div className="min-w-0">
                     <p className="truncate text-[13.44px] uppercase tracking-[0.1em]">The Phantom of the Opera</p>
-                    {masterLoad === "loading" && <p className="mt-1 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3]">Loading</p>}
+                    {/* Always rendered, so screen readers are already watching it when a load starts or fails. */}
+                    <p role="status" className="text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] not-empty:mt-1">{masterLoad === "loading" ? "Loading" : masterLoad === "failed" ? "Couldn't load" : null}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-[13.44px] tabular-nums text-[#a5bed3]">
@@ -846,7 +803,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="stems" ref={stemsSectionRef} className="relative scroll-mt-[90px] py-20 sm:py-28 lg:scroll-mt-[190px]">
+        <section id="stems" ref={stemsSectionRef} className="relative py-20 sm:py-28">
           <div ref={stemsApproachRef} aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-[200px] h-px" />
           <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
             <div className="mb-10 flex flex-col justify-between gap-7 sm:flex-row sm:items-end">
@@ -865,8 +822,10 @@ export default function Home() {
                 const audible = !stemMute[stem.id] && (!anySolo || stemSolo[stem.id]);
                 // A row is pending until its own stem decodes. Until the stems are asked to play, a pending
                 // row's play button does nothing; once they are, it works like any other row, and its stem
-                // joins the others the moment it decodes.
+                // joins the others the moment it decodes. A row whose stem failed to load offers to retry
+                // it, and a stem that loads on a retry joins the others the same way.
                 const pending = stemLoad === "loading" && !stemReady[stem.id];
+                const failed = stemLoad === "failed" && !stemReady[stem.id];
                 const starting = stemLoad === "loading" && wanted === "stems" && !stemsPlaying;
                 const inert = pending && wanted !== "stems";
                 // Below 768px a row takes two lines: play, name and waveform above; solo,
@@ -874,12 +833,12 @@ export default function Home() {
                 // keep the source order, so tabbing follows the screen at any width.
                 return (
                   <article key={stem.id} className={`grid grid-cols-[44px_104px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-[#3b4154] py-3 transition-opacity md:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto_auto] md:gap-x-5 md:gap-y-0 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
-                    <button onClick={inert ? undefined : toggleStems} aria-disabled={inert} aria-busy={pending || starting} aria-label={inert ? `${stem.name} still loading` : `${wanted === "stems" ? "Pause" : "Play"} all stems from ${stem.name} row`} className={`relative grid h-9 w-9 place-items-center rounded-full border transition-colors *:pointer-events-none before:absolute before:-inset-[5px] before:content-[''] ${inert ? "cursor-default border-[#3b4154] text-[#6a99ab]" : "border-[#a5bed3] bg-[rgba(42,75,90,.38)] text-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f]"}`}>
-                      {pending || starting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
+                    <button onClick={failed ? () => void loadStems() : inert ? undefined : toggleStems} aria-disabled={inert} aria-busy={pending || starting} aria-label={failed ? `Retry loading ${stem.name}` : inert ? `${stem.name} still loading` : `${wanted === "stems" ? "Pause" : "Play"} all stems from ${stem.name} row`} className={`relative grid h-9 w-9 place-items-center rounded-full border transition-colors *:pointer-events-none before:absolute before:-inset-[5px] before:content-[''] ${inert ? "cursor-default border-[#3b4154] text-[#6a99ab]" : "border-[#a5bed3] bg-[rgba(42,75,90,.38)] text-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f]"}`}>
+                      {pending || starting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : failed ? <RefreshCw className="h-3.5 w-3.5" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
                     </button>
                     <p className="min-w-0 text-[12.8px] uppercase leading-[1.4] tracking-[0.06em] md:truncate">{stem.name}</p>
                     <div
-                      className={`relative h-[38px] min-w-0 cursor-pointer transition-opacity before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-[''] ${pending ? "opacity-40" : ""}`}
+                      className={`relative h-[38px] min-w-0 cursor-pointer transition-opacity before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-[''] ${pending || failed ? "opacity-40" : ""}`}
                       role="slider"
                       tabIndex={0}
                       aria-label={`${stem.name} playback position`}
@@ -908,7 +867,7 @@ export default function Home() {
             <div className="mt-5 flex flex-col justify-between gap-4 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] sm:flex-row sm:items-center">
               <span className="tabular-nums">
                 {formatTime(stemsTime)} / {formatTime(STEM_DURATION)}
-                <span role="status">{stemLoad === "loading" ? ` • Loading stems • ${Object.keys(stemReady).length} of ${STEMS.length} ready` : stemLoad === "ready" ? <span className="sr-only">All stems ready</span> : ""}</span>
+                <span role="status">{stemLoad === "loading" ? ` • Loading stems • ${stemsReady} of ${STEMS.length} ready` : stemLoad === "failed" ? (stemsReady === 0 ? " • Stems couldn't load" : ` • ${stemsReady} of ${STEMS.length} ready • ${STEMS.length - stemsReady} couldn't load`) : stemLoad === "ready" ? <span className="sr-only">All stems ready</span> : ""}</span>
               </span>
               <button onClick={() => setOutputMuted((value) => !value)} className="flex items-center gap-2 text-[13.44px] text-[#a5bed3] hover:text-white" aria-label={outputMuted ? "Unmute all audio" : "Mute all audio"}>
                 {outputMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />} {outputMuted ? "Output muted" : "Output active"}
@@ -917,12 +876,6 @@ export default function Home() {
           </div>
         </section>
       </main>
-
-      <footer className="border-t border-[#3b4154] bg-[#00040a] bg-[linear-gradient(transparent,#0b0f23)] py-9">
-        <div className="mx-auto flex max-w-[1240px] justify-center px-5 sm:px-8">
-          <Wordmark className="h-auto w-[180px]" />
-        </div>
-      </footer>
     </div>
   );
 }

@@ -9,6 +9,7 @@
 
 /** Brand artwork, all committed; see docs/ASSETS.md. */
 export const BRAND = {
+  // Not used by the page: the host page shows the wordmark. Kept with the files for reference.
   logo: "/images/phantom-wordmark-white.png",
   logoAvif: "/images/phantom-wordmark-white.avif",
   background: "/images/smoke-bg.jpg",
