@@ -33,6 +33,7 @@ import type { ExportStage } from "@/mixExport";
 import SignupModal, { submitSignup } from "@/components/SignupModal";
 import type { SignupDetails } from "@/components/SignupModal";
 import type { DownloadKind } from "@/consent";
+import { bringIntoView } from "@/embed";
 
 /**
  * The smoke behind the page, in two layers.
@@ -226,14 +227,15 @@ function WaveBars({ peaks, progress }: { peaks: number[]; progress: number }) {
 }
 
 /**
- * In-page links scroll with scrollIntoView rather than fragment navigation.
- * Embedded in an auto-height frame the page has nothing of its own to scroll,
- * and a fragment change would neither move the parent page nor stay out of its
- * Back history.
+ * In-page links scroll rather than navigate to a fragment: a fragment change
+ * would neither move the parent page when framed nor stay out of its Back
+ * history. How the scroll happens differs between a standalone page and a framed
+ * one; see bringIntoView.
  */
 function scrollToTarget(event: ReactMouseEvent<HTMLAnchorElement>) {
   event.preventDefault();
-  document.getElementById(event.currentTarget.hash.slice(1))?.scrollIntoView();
+  const target = document.getElementById(event.currentTarget.hash.slice(1));
+  if (target) bringIntoView(target);
 }
 
 function pointerTime(event: ReactPointerEvent<HTMLElement>, duration: number) {

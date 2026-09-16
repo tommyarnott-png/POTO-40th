@@ -76,6 +76,26 @@
     scroll-behavior: smooth;
   }
 
+  /*
+   * Framed (src/embed.ts sets the class), the frame is sized to the content and the
+   * parent does the scrolling, so a scrollbar of our own is only ever the second of
+   * two — it appears whenever the content grows a moment before the parent resizes
+   * the frame, and it narrows the layout by its own width while it is there.
+   *
+   * The vertical axis only. Hiding both would also remove the sideways scroll that
+   * a frame narrower than the body's 320px minimum relies on, leaving its right
+   * edge unreachable. Set on html, which governs the viewport directly; body would
+   * do it too, but only for as long as html stays visible.
+   *
+   * With this in place the parent's resize listener is load-bearing: a frame left
+   * shorter than the content has no scrollbar to reach the rest with. The height
+   * the page reports is unaffected — body.scrollHeight measured the same with and
+   * without it in Chromium, WebKit and Firefox.
+   */
+  html.embedded {
+    overflow-y: hidden;
+  }
+
   body {
     margin: 0;
     min-width: 320px;

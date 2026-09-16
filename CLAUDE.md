@@ -4,10 +4,12 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-**Current build state (16 September 2026):** eight passes are done and live on
+**Current build state (16 September 2026):** nine passes are done and live on
 staging: the production team's feedback, hardening, brand alignment, host-page
-embedding, the mix export, the artwork and levels pass, the download gate, and the
-Box Five presentation pass (the signup form and the smoke background).
+embedding, the mix export, the artwork and levels pass, the download gate, the
+Box Five presentation pass (the signup form and the smoke background), and the
+frame pass (in-page scrolling and the scrollbar when embedded, see The frame
+relationship).
 The A/B plays a 104.77s section cut to match the stems. It switches between the two **release
 packshots** — AVIF with a JPEG fallback at 320/640/960, `srcset` and `sizes`
 against a box that runs 122–240px — not the masks it used to show; clicking one
@@ -15,21 +17,23 @@ cuts between the masters in 8ms on an equal-power curve, and a crossfade slider
 beneath blends them on an equal-power law at a master level of 0.78 so the blend
 never clips. The packshots are full-bleed sleeves, so they carry a drawn edge
 that brightens with the mix rather than the screen blend the cut-out masks used.
-The page follows the official London site: the real wordmark (AVIF with a PNG
-fallback), Jost for all text, the site's palette, heading treatments and button
+The page follows the official London site — the host page supplies the wordmark
+and navigation — with Jost for all text, the site's palette, heading treatments and button
 styling, and very little small print. Waveforms are mirrored canvas bars, the
 stems on one shared scale. Stem rows are two lines below 768px, and each row
 becomes playable as its own stem decodes; stems that decode after play has been
 pressed join the running clock. The eight stems share a **bus trim** before the
 output (see Stem bus trim). Audio plays at 40kHz with staged loading and release
 (see Loading and memory). A visitor can **render their mix to an MP3** (see The
-mix export). Inside a frame the page leaves out its links to other sites and
-reports its height to the parent; it is kept out of search indexes. Playback
-audio is AAC (masters 128 kbps, stems 96 kbps). **Both downloads now sit behind a
+mix export). Inside a frame the page reports its height to the parent, asks the
+parent to do its in-page scrolling, and hides its own vertical scrollbar (see The
+frame relationship); it is kept out of search indexes. Playback audio is AAC
+(masters 128 kbps, stems 96 kbps). **Both downloads now sit behind a
 details-capture form** (see The data path): the visitor's own mix, and the
-high-quality stem pack served from R2. Not built yet: nothing, beyond uploading
-the stem archive itself, which has never been located — the bucket is empty and
-the button says so.
+high-quality stem pack served from R2. The stem archive is now in the bucket
+(`GroupedStems-ForWebsite.zip`, 220,322,302 bytes, eight 44.1kHz 24-bit WAVs) and
+has been downloaded through the gate end to end, byte-identical to the object,
+standalone and from inside a cross-origin frame. Not built yet: nothing.
 
 The A/B masks (`public/images/mask-original.png`, `mask-remaster.png`) are still
 in the repo and still tracked, but nothing renders them: their `BRAND` entries in
@@ -50,7 +54,7 @@ src/components/           ErrorBoundary, and SignupModal — the capture form be
 worker/index.ts           the Worker: POST /api/signup, GET|HEAD /api/download
 supabase/migrations/      the signups schema, applied to project sbldznxjtqnwibspcydm
 src/assets.ts             asset paths, durations, playback sample rate, stem bus trim, master-alignment constants
-src/embed.ts              whether the page is framed; posts its height to the frame
+src/embed.ts              whether the page is framed; posts its height and scroll requests to the parent
 src/data/trackPeaks.json  generated waveform envelopes (npm run peaks)
 src/index.css             Tailwind, Jost @font-face, heading treatments, the few custom classes
 public/audio/             playback AAC files, committed
@@ -58,7 +62,7 @@ public/images/, fonts/    wordmark, release packshots, the unused A/B masks, smo
 public/_headers           noindex on every response; robots.txt allows crawling so it is read
 scripts/build-audio.sh    cuts and encodes the source WAVs (sources are not in git)
 tools/                    waveform generator and alignment measurement scripts
-docs/                     ASSETS.md (audio, alignment), EMBED.md (iframe snippet, search engines), brand-assets-provenance.md (official site measurements)
+docs/                     ASSETS.md (audio, alignment), EMBED.md (the two frame messages, the host snippet, search engines), brand-assets-provenance.md (official site measurements)
 wrangler.jsonc            Cloudflare deployment: the Worker entry, run_worker_first, the R2 and rate-limit bindings
 ```
 
@@ -301,6 +305,54 @@ live produces false failures.
 twice: it holds the very top and bottom near the page's own `#00060f`, so where our
 page meets the host page's background there is no tonal step. Verified in a 340px
 frame — host `rgb(0,6,15)`, our first rows `rgb(1,7,15)`, our last `rgb(5,9,15)`.
+
+## The frame relationship
+
+The contract with the host page is in `docs/EMBED.md`; the code is `src/embed.ts`.
+The page posts two messages to its parent, `{ type: "resize-iframe", height }` and
+`{ type: "scroll-iframe", offset }`, and the host implements a listener for each.
+
+**The page must keep working standalone.** The production team may link out to it
+rather than embed it if the embed does not work out, so nothing may be moved onto
+the host site or made to depend on a frame — the hero and its "Begin listening"
+link in particular stay on this page. Standalone, in-page links scroll the page
+themselves, smoothly, and the page scrolls normally; everything frame-specific is
+behind the `embedded` check in `src/embed.ts` and the `html.embedded` class.
+
+**Host integrations that predate this pass are broken and need re-copying.**
+`docs/EMBED.md` documented the height message as `poto-40th:height`, a type the
+page has not sent since `c74ab10` changed it to `resize-iframe`. A listener copied
+from the old document never resizes the frame — verified: it stays at its 3000px
+starting height while the content is 3127px at 340px. That used to cost a second
+scrollbar. With this pass hiding the page's own vertical scrollbar when framed, it
+now leaves the bottom of the page unreachable, so any existing integration has to
+be re-copied from the current snippet.
+
+**In embedded Safari the scroll listener is required, not optional.** WebKit does
+not let a cross-origin frame move its parent by any means — `scrollIntoView`,
+`focus()` and a fragment change were all tried and none moves it. So without the
+host's scroll listener, "Begin listening" does nothing in Safari, which is every
+browser on an iPhone; it was already a dead link there before this pass. In Chrome,
+Edge and Firefox the page falls back on its own: it watches the target with an
+IntersectionObserver, and if the parent has not moved it within 400ms, scrolls
+itself, which reaches the parent as an instant jump. Measured in Playwright's WebKit
+build; confirm on a real iPhone when one is to hand.
+
+Two decisions here look like mistakes and are not:
+
+- **The fallback watches rather than waits.** A plain timer would scroll the page
+  away from a host that had already scrolled smoothly to its own offset (to clear a
+  sticky header, say). The baseline is taken before the request is posted, so a host
+  that scrolls instantly — as it should for reduced-motion visitors — is not mistaken
+  for one that did nothing.
+- **`overflow-y: hidden`, not `overflow: hidden`, and on `html`.** Hiding both axes
+  also removes the sideways scroll a frame narrower than the body's 320px minimum
+  needs. `html` governs the viewport directly; `body` would only do so while `html`
+  stays visible. `body.scrollHeight`, which the height report uses, measured the same
+  with and without the rule in Chromium, WebKit and Firefox, and wheel and touch
+  scrolling over the frame still move the host page. `overflow: clip` would not stop
+  the fallback scrolling the page's own root in an undersized frame either: on the
+  root element, `clip` is treated as `hidden`.
 
 ## Why the A/B cannot be perfectly aligned
 
