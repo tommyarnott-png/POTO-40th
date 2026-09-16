@@ -13,8 +13,33 @@ export const BRAND = {
   logo: "/images/phantom-wordmark-white.png",
   logoAvif: "/images/phantom-wordmark-white.avif",
   background: "/images/smoke-bg.jpg",
+  // Not used by the page: the A/B switches between the release packshots now. Kept with the files for reference.
   maskOriginal: "/images/mask-original.png",
   maskRemaster: "/images/mask-remaster.png",
+} as const;
+
+/**
+ * The release artwork the A/B switches between, as AVIF with a JPEG fallback, the
+ * same pair of formats the wordmark ships in.
+ *
+ * Three widths for one box: the control draws the artwork at 122px inside a 340px
+ * frame, 147px on a 390px phone, and 240px from 648px up, where it stops growing.
+ * So 320 covers a phone at 2x and any desktop at 1x, 640 a phone at 3x and a
+ * retina desktop, and 960 only the capped box at 3x.
+ */
+const PACKSHOT_WIDTHS = [320, 640, 960];
+
+function packshot(release: string) {
+  return {
+    avif: PACKSHOT_WIDTHS.map((width) => `/images/packshot-${release}-${width}.avif ${width}w`).join(", "),
+    jpeg: PACKSHOT_WIDTHS.map((width) => `/images/packshot-${release}-${width}.jpg ${width}w`).join(", "),
+    fallback: `/images/packshot-${release}-640.jpg`,
+  };
+}
+
+export const PACKSHOTS = {
+  oldMaster: packshot("1986"),
+  newMaster: packshot("2026"),
 } as const;
 
 /** Compressed playback audio, committed under public/audio. */
@@ -71,6 +96,29 @@ export const STEM_DURATION = 104.08;
  * for resampling, while holding 17% less decoded audio than a 48kHz device rate.
  */
 export const PLAYBACK_SAMPLE_RATE = 40000;
+
+/** Pause, seek and start fade the gain this long, so no waveform is cut mid-cycle. */
+export const FADE_SECONDS = 0.005;
+
+/**
+ * The trim the eight stems share before the output. Measured: at their 0.86
+ * default the eight sum to +0.51dBFS, so without it the stem bus clipped at the
+ * hardware, while the masters — carrying 0.78 inside their own gains — peak at
+ * -1.97dBFS. 0.794 is 2.01dB down, which lands the default at -1.4dBFS playing
+ * and -1.6dBFS through the export's resample: clear of full scale, and clear of
+ * the export's -1dBFS ceiling, so a default mix now needs no makeup at all.
+ *
+ * It covers the whole range, not just the default: every fader at 1.0 is the
+ * loudest the bus can be asked for, and that reaches only -0.28dBFS. Solo and
+ * mute only ever remove stems. So nothing a visitor can set will clip it.
+ *
+ * What it does not do is close the loudness gap to the A/B. The stem sum has a
+ * 17.4dB crest where the mastered 2026 file has 14.2dB, so peak-matching and
+ * loudness-matching pull opposite ways: the section reads 2.9LU below the A/B
+ * (-17.1 against -14.2 LUFS). Only limiting would close that, and a limiter
+ * would move the balance the visitor set.
+ */
+export const STEM_BUS_TRIM = 0.794;
 
 /**
  * The 1986 master and the 2026 remaster were cut from different tape transfers,
