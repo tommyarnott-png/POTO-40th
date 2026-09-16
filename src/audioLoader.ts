@@ -12,7 +12,12 @@
  */
 import { PLAYBACK_SAMPLE_RATE } from "@/assets";
 
-export type Track = { id: string; file: string; mono?: boolean };
+/**
+ * `decodeRate`, when given, decodes the track at that rate and then holds its
+ * samples as PLAYBACK_SAMPLE_RATE, which speeds it up by the ratio of the two with
+ * the decoder's own resampler rather than a buffer source's (see OLD_MASTER_DECODE_RATE).
+ */
+export type Track = { id: string; file: string; mono?: boolean; decodeRate?: number };
 
 /** A track's audio, and where on its timeline the held audio begins, in seconds. */
 export type HeldTrack = { buffer: AudioBuffer; start: number };
@@ -35,9 +40,9 @@ function hold(context: BaseAudioContext, decoded: AudioBuffer, track: Track, tri
     first = Math.max(0, first - margin);
     last = Math.min(decoded.length - 1, last + margin);
   }
-  if (!track.mono && first === 0 && last === decoded.length - 1) return { buffer: decoded, start: 0 };
+  if (!track.mono && first === 0 && last === decoded.length - 1 && decoded.sampleRate === PLAYBACK_SAMPLE_RATE) return { buffer: decoded, start: 0 };
 
-  const buffer = context.createBuffer(track.mono ? 1 : channels.length, last - first + 1, decoded.sampleRate);
+  const buffer = context.createBuffer(track.mono ? 1 : channels.length, last - first + 1, PLAYBACK_SAMPLE_RATE);
   if (track.mono) {
     const mono = buffer.getChannelData(0);
     for (let frame = first; frame <= last; frame += 1) {
@@ -48,7 +53,7 @@ function hold(context: BaseAudioContext, decoded: AudioBuffer, track: Track, tri
   } else {
     channels.forEach((data, index) => buffer.copyToChannel(data.subarray(first, last + 1), index));
   }
-  return { buffer, start: first / decoded.sampleRate };
+  return { buffer, start: first / PLAYBACK_SAMPLE_RATE };
 }
 
 /**
@@ -74,7 +79,8 @@ export function createTrackSet(tracks: Track[], { trim = false, onTrack }: { tri
       const file = await response.arrayBuffer();
       const decode = decoding.then(async () => {
         if (expected !== generation) return;
-        const decoded = hold(decoder, await decoder.decodeAudioData(file), track, trim);
+        const source = track.decodeRate ? new OfflineAudioContext(1, 1, track.decodeRate) : decoder;
+        const decoded = hold(decoder, await source.decodeAudioData(file), track, trim);
         if (expected !== generation) return;
         ready[track.id] = decoded;
         onTrack?.(track.id);

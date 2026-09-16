@@ -122,9 +122,14 @@
  * at its own breakpoints (480, 768 and 992px): capitals with wide tracking, the
  * main heading filled with the site's blue gradient. docs/brand-assets-provenance.md
  * records the measurements.
+ *
+ * One departure: 24px on a phone where the official page sets 22px. At 24px the
+ * headings count as large text, which they need to, because the darker end of
+ * their gradient only reaches 3.3:1 over the brightest smoke (see SMOKE_SCRIM in
+ * Home.tsx).
  */
 .section-heading {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 400;
   line-height: 1;
   letter-spacing: 0.15em;
@@ -183,6 +188,12 @@
 /*
  * The level sliders: a 44px-tall hit area around a thin track, and a thumb
  * large enough to find without looking twice.
+ *
+ * The thumb's faint ring is its border, not a box-shadow. A shadow takes no room,
+ * so the browser left it out when working out how far the thumb can travel, and at
+ * full level the ring hung 4px past the end of the row. As a border it is part of
+ * the thumb's own box and stops where the track does. The fill is clipped to the
+ * padding box so the ring stays see-through.
  */
 input[type="range"] {
   -webkit-appearance: none;
@@ -206,22 +217,22 @@ input[type="range"]::-moz-range-track {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  margin-top: -7.5px;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  margin-top: -11.5px;
   border-radius: 9999px;
-  background: #a5bed3;
-  border: 1px solid #a5bed3;
-  box-shadow: 0 0 0 4px rgba(165, 190, 211, 0.14);
+  border: 4px solid rgba(165, 190, 211, 0.14);
+  background: #a5bed3 padding-box;
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
   border-radius: 9999px;
-  background: #a5bed3;
-  border: 1px solid #a5bed3;
-  box-shadow: 0 0 0 4px rgba(165, 190, 211, 0.14);
+  border: 4px solid rgba(165, 190, 211, 0.14);
+  background: #a5bed3 padding-box;
 }
 
 /* Drawn at 32px; the ::before, measured from inside the 1px border, extends the hit area to 44px. */

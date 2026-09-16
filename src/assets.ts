@@ -144,8 +144,54 @@ export const STEM_BUS_TRIM = 0.794;
  *
  * Both masters are scheduled against a single AudioContext start time; the
  * switch only ever changes gain, never restarts a source.
+ *
+ * The rate is applied once, when the 1986 master is decoded, not on every sample
+ * as it plays (see OLD_MASTER_DECODE_RATE).
  */
 export const OLD_MASTER_START_OFFSET = 0.000919;
 export const OLD_MASTER_PLAYBACK_RATE = 1.00191398;
-/** The 1986 master sits quieter; this matches it to the remaster at unity. */
-export const OLD_MASTER_GAIN_COMPENSATION = 1.17489755;
+
+/**
+ * The rate the 1986 master is decoded at, so that its samples, relabelled as
+ * PLAYBACK_SAMPLE_RATE, play OLD_MASTER_PLAYBACK_RATE fast at a playback rate of 1.
+ *
+ * It used to be played through playbackRate instead, and that was the distortion
+ * heard on the 1986 side and not on the 2026: browsers resample a buffer source by
+ * interpolating between neighbouring samples, and a rate that is not 1 moves every
+ * read between them. Measured on a sine at this rate, Chrome and Safari left
+ * distortion 32dB down at 5kHz, 18dB down at 10kHz and 8.6dB down at 15kHz, and
+ * took up to 4dB off the top; on the 1986 master itself the error came to -39.9
+ * LUFS under music at -13.9. Decoding resamples with each engine's own converter
+ * instead: at this rate, 73 to 93dB down across the band in Chrome, Safari and
+ * Firefox.
+ *
+ * A whole number, because Firefox truncates a fractional decode rate. It makes the
+ * 1986 side run 1.0019036 fast rather than 1.00191398; the offset is worked out
+ * afresh at every start and seek, so the difference only accumulates while it
+ * plays, to 1.1ms across the whole section — inside the 5ms the rhythm section is
+ * aligned to.
+ */
+export const OLD_MASTER_DECODE_RATE = Math.round(PLAYBACK_SAMPLE_RATE / OLD_MASTER_PLAYBACK_RATE);
+export const OLD_MASTER_SPEED = PLAYBACK_SAMPLE_RATE / OLD_MASTER_DECODE_RATE;
+
+/**
+ * The level that matches the 1986 master's loudness to the remaster's, so that the
+ * A/B compares the two mixes rather than two volumes. +1.79dB: the two sides'
+ * integrated loudness (BS.1770) across the section as it plays, -13.92 against
+ * -12.13 LUFS at unity. It was +1.40dB, set by RMS, which weighs the 1986 master's
+ * heavier low end as loudness it does not have; by loudness that left the 1986 side
+ * 0.46LU under the remaster before anyone had decided it should be.
+ *
+ * A measurement. The deliberate difference is OLD_MASTER_TILT_DB.
+ */
+export const OLD_MASTER_GAIN_COMPENSATION = 1.22885319;
+
+/**
+ * How much quieter than a level match the 1986 side is played, by the client's
+ * choice, so that the remaster lands with more impact. This is an editorial
+ * decision, not a correction: it makes the 2026 sound better for a reason that has
+ * nothing to do with the mix, which is exactly what the level match above exists to
+ * prevent. Set it to 0 to compare the mixes on their own. At -1dB the 1986 side
+ * plays 1.0LU under the remaster, and peaks at -1.7dBTP to the remaster's -1.9.
+ */
+export const OLD_MASTER_TILT_DB = -1;

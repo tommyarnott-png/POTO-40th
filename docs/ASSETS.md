@@ -57,11 +57,12 @@ variables at the top of the script.
 | `public/images/phantom-wordmark-white.avif` | White production wordmark, 1092 × 330, from the official site's CDN, scaled down from 6543 × 1980 | Yes |
 | `public/images/phantom-wordmark-white.png` | The same wordmark as PNG, for browsers without AVIF | Yes |
 
-All four are committed; the repo is private. The masks and the background were
-supplied for this page, and the wordmark comes from the official site. There is
-no typeset fallback: if the wordmark files go missing, the header and footer show
-a broken image. The masks sit on pure black, which the page blends away so they
-read against its own background.
+All five are committed; the repo is private. The masks and the background were
+supplied for this page, and the wordmark comes from the official site. Only the
+background is rendered now: the host page supplies the wordmark and navigation, so
+this page has no header or footer to show it in, and the A/B switches between the
+release packshots rather than the masks. The wordmark and mask files are kept for
+reference; their `BRAND` entries in `src/assets.ts` are marked unused.
 
 Jost, the official site's heading face, is self-hosted from `public/fonts` under
 the SIL Open Font License, with the licence text alongside, and sets all of the
@@ -77,7 +78,10 @@ The two masters were cut from different transfers: they do not start at the same
 sample and do not run at quite the same speed. Three constants in `src/assets.ts`
 correct for that — a start offset, a playback-rate ratio and a gain match — and
 are what let the A/B switch cross between the two without a slow slide out of
-sync. Re-measure them whenever either master is re-cut.
+sync. Re-measure them whenever either master is re-cut. The ratio is applied when
+the 1986 master is decoded (`OLD_MASTER_DECODE_RATE`), not as a buffer source's
+playback rate, which distorted it audibly; the reasons are in CLAUDE.md under "The
+1986 master".
 
 **Where the section comes from.** The short edit starts at the very start of the
 2026 remaster and is a plain trim (resampled to 44.1kHz) with a 3s fade-out:
@@ -122,5 +126,8 @@ audio conformed to the 2026 timeline by the mix engineer would remove that.
 Over the whole track the player has to speed the 1986 transfer up by 1.00237026
 to keep pace (`tools/measure_envelope_drift.py`, which reads 8kHz 16-bit mono
 decodes of the two masters). The tape speed wanders, and across this section the
-ratio is 1.00191398. The gain match (1.17489755, +1.40dB) still holds for the section,
-which measures +1.46dB by RMS.
+ratio is 1.00191398. The gain match is by loudness: +1.79dB (1.22885319), from the
+section's integrated loudness (BS.1770) as it plays, -13.92 against -12.13 LUFS. It
+was +1.40dB, set by RMS (the section measures +1.46dB that way), which left the 1986
+side 0.46LU under the remaster. The deliberate cut of the 1986 side below that match
+is a separate constant, `OLD_MASTER_TILT_DB`.

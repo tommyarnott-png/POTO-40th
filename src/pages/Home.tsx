@@ -15,9 +15,12 @@ import {
   BRAND,
   FADE_SECONDS,
   MASTER_DURATION,
+  OLD_MASTER_DECODE_RATE,
   OLD_MASTER_GAIN_COMPENSATION,
   OLD_MASTER_PLAYBACK_RATE,
+  OLD_MASTER_SPEED,
   OLD_MASTER_START_OFFSET,
+  OLD_MASTER_TILT_DB,
   PACKSHOTS,
   PLAYBACK,
   PLAYBACK_SAMPLE_RATE,
@@ -44,29 +47,31 @@ import { bringIntoView } from "@/embed";
  * that range (its spread is as large as its mean); the range simply never rises far
  * enough to be seen. A flat wash on top then halved what little there was, which is
  * why the page read as flat near-black. Lifting the wash alone cannot fix that, so the
- * plate carries a filter that opens the photograph's range out, and the darkening is
- * shaped rather than poured evenly over it.
+ * plate carries a filter that opens the photograph's range out.
  *
- * The shaping does two jobs at once. Vertically it keeps the very top and bottom close
- * to the page's own #00060f, so that where our page meets the host page's background
- * there is no tonal step; through the middle it lets go, and the smoke carries the
- * section. Horizontally it holds the outer quarter back, which is the site's own
- * treatment, but to a translucent blue rather than to solid black as before.
+ * The darkening over it is the same strength everywhere. It used to be heavier at the
+ * top and bottom than through the middle, and inside the host's auto-height frame,
+ * where "fixed" means the whole document, that read as bands changing strength down
+ * the page. The sides are still held back, the site's own treatment, and at exactly
+ * 270deg: any angle off horizontal drifts down a tall frame as well.
  *
- * Measured after the change, over every text run on the page at both widths: worst
- * contrast 5.52:1 at 1280px and 5.01:1 at 390px, against a 4.5 requirement.
+ * Contrast is judged by the worst case, not at a few scroll positions: the photograph
+ * does not move with the page, so any line of copy can come to rest over any part of
+ * it. The worst is the brightest glyph-sized patch of this backdrop anywhere in the
+ * content column. At .70 it is a luminance of 0.043 on a phone, 0.052 on a 1440px
+ * desktop and 0.050 inside the host's frame at any width, which puts the smallest pale
+ * blue labels at 5.3:1 or better and the section headings' darker gradient stop at
+ * 3.3:1 — enough for large text only, which is why .section-heading is 24px on a phone.
+ * The shaped version it replaces failed that test: 2.8:1 for the labels at 1440px.
  *
- * The binding constraint is pale blue #a5bed3 at 13.44px sitting straight on the plate
- * ("Begin listening"), and it binds hardest on a phone, not on a desktop: `cover` crops
- * a 390px viewport into the middle of the photograph, which is its brightest part, so
- * the same settings that measured 4.78:1 at 1280px measured 3.92:1 at 390px and failed.
- * Check 390 before 1280 when either number here moves — the desktop reading is the
- * forgiving one.
+ * The cost is the smoke. This much darkening leaves about half the visible texture the
+ * shaped version had through the middle of the page; no uniform treatment kept more
+ * and passed at every width, whether the plate was dimmed or the wash raised.
  */
 const SMOKE_FILTER = "brightness(2) contrast(1.16)";
 const SMOKE_SCRIM = [
-  "linear-gradient(260deg, rgba(0,6,15,.78), transparent 25%, transparent 75%, rgba(0,6,15,.78))",
-  "linear-gradient(180deg, rgba(0,6,15,.92) 0%, rgba(0,6,15,.48) 16%, rgba(0,6,15,.4) 52%, rgba(0,6,15,.58) 86%, rgba(0,6,15,.94) 100%)",
+  "linear-gradient(270deg, rgba(0,6,15,.78), transparent 25%, transparent 75%, rgba(0,6,15,.78))",
+  "linear-gradient(rgba(0,6,15,.7), rgba(0,6,15,.7))",
 ].join(", ");
 
 function formatTime(value: number) {
@@ -248,7 +253,7 @@ export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const stemBusRef = useRef<GainNode | null>(null);
   const [masterSet] = useState(() => createTrackSet([
-    { id: "oldMaster", file: PLAYBACK.oldMaster },
+    { id: "oldMaster", file: PLAYBACK.oldMaster, decodeRate: OLD_MASTER_DECODE_RATE },
     { id: "newMaster", file: PLAYBACK.newMaster },
   ]));
   const [stemSet] = useState(() => createTrackSet(STEMS, { trim: true, onTrack: joinStem }));
@@ -324,6 +329,14 @@ export default function Home() {
 
   function getContext() {
     if (!audioContextRef.current) {
+      // An iPhone's silent switch mutes Web Audio outright: Safari files a bare
+      // AudioContext under iOS's ambient category, and the page gets no error and no
+      // sign of it. Playback is the category a music player uses; it plays through the
+      // switch and, as a music player does, pauses whatever else was playing. Inside a
+      // cross-origin frame Safari ignores this unless the frame is allowed the
+      // microphone, so there the host page sets it (see docs/EMBED.md).
+      const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+      if (session) session.type = "playback";
       const context = new AudioContext({ latencyHint: "interactive", sampleRate: PLAYBACK_SAMPLE_RATE });
       // Eight stems need one place to hold the sum down; the two masters carry
       // their own level in masterLevels() instead. See STEM_BUS_TRIM.
@@ -421,14 +434,15 @@ export default function Home() {
    * across the section (BS.1770 loudness) it stays within 0.24LU of the ends at every
    * position, where a linear law dips 3.23LU at the centre: the two versions correlate
    * at -0.05, band-only passages included, so they add as unrelated signals. At 0.84
-   * the centre peaked 0.09dB over full scale; at 0.78 the loudest position peaks at
-   * -0.55dBFS. Sines keep the ends exactly 0 and 1.
+   * the centre peaked 0.09dB over full scale; at 0.78, with the 1986 side matched and
+   * then tilted down (see OLD_MASTER_TILT_DB), the loudest position peaks at -0.6dBTP.
+   * Sines keep the ends exactly 0 and 1.
    */
   function masterLevels(): Record<MasterId, number> {
     const { fade: toRemaster, outputMuted: muted } = mixRef.current;
     const level = muted ? 0 : 0.78;
     return {
-      oldMaster: level * OLD_MASTER_GAIN_COMPENSATION * Math.sin((Math.PI / 2) * (1 - toRemaster)),
+      oldMaster: level * OLD_MASTER_GAIN_COMPENSATION * 10 ** (OLD_MASTER_TILT_DB / 20) * Math.sin((Math.PI / 2) * (1 - toRemaster)),
       newMaster: level * Math.sin((Math.PI / 2) * toRemaster),
     };
   }
@@ -524,11 +538,15 @@ export default function Home() {
     if (request !== requestRef.current || !held) return;
 
     const when = context.currentTime + START_DELAY_SECONDS;
-    const position = Math.min(masterOffsetRef.current, MASTER_DURATION - 0.02);
+    // Both offsets on whole frames: Safari reads a buffer at a fractional offset by
+    // interpolating, which took up to 4dB off the top at 15kHz. The 1986 buffer is
+    // already at the 1986 side's speed, so its offset is the matched 1986 position
+    // in that buffer's own time.
+    const frame = (seconds: number) => Math.round(seconds * PLAYBACK_SAMPLE_RATE) / PLAYBACK_SAMPLE_RATE;
+    const position = frame(Math.min(masterOffsetRef.current, MASTER_DURATION - 0.02));
     const levels = masterLevels();
     const oldMaster = createVoice(context, held.oldMaster.buffer, levels.oldMaster, when);
-    oldMaster.source.playbackRate.value = OLD_MASTER_PLAYBACK_RATE;
-    oldMaster.source.start(when, OLD_MASTER_START_OFFSET + position * OLD_MASTER_PLAYBACK_RATE);
+    oldMaster.source.start(when, frame((OLD_MASTER_START_OFFSET + position * OLD_MASTER_PLAYBACK_RATE) / OLD_MASTER_SPEED));
     const newMaster = createVoice(context, held.newMaster.buffer, levels.newMaster, when);
     newMaster.source.start(when, position);
 
@@ -897,8 +915,8 @@ export default function Home() {
           </a>
         </section>
 
-        <section id="masters" className="border-y border-[#3b4154] bg-[#00060f]/44 py-20 sm:py-28">
-          <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
+        <section id="masters" className="border-y border-[#3b4154] py-20 sm:py-28">
+          <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
             <div className="mb-12 max-w-[700px]">
               <h2 className="section-heading">One performance. Two mixes.</h2>
               <p className="mt-5 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play once, then switch between the original master and the new remaster at any moment.</p>
@@ -1031,7 +1049,7 @@ export default function Home() {
 
         <section id="stems" ref={stemsSectionRef} className="relative py-20 sm:py-28">
           <div ref={stemsApproachRef} aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-[200px] h-px" />
-          <div className="mx-auto max-w-[1120px] px-5 sm:px-8">
+          <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
             <div className="mb-10 flex flex-col justify-between gap-7 sm:flex-row sm:items-end">
               <div className="max-w-[700px]">
                 <h2 className="section-heading">Inside the new mix.</h2>
@@ -1054,17 +1072,26 @@ export default function Home() {
                 const failed = stemLoad === "failed" && !stemReady[stem.id];
                 const starting = stemLoad === "loading" && wanted === "stems" && !stemsPlaying;
                 const inert = pending && wanted !== "stems";
-                // Below 768px a row takes two lines: play, name and waveform above; solo,
-                // mute and a level slider wide enough to set by touch below. Both layouts
-                // keep the source order, so tabbing follows the screen at any width.
+                // A row reads like a mixer channel: play, name, solo, mute, level, then the
+                // stem's waveform taking whatever width is left. Below 768px the controls
+                // share one 44px line and the waveform runs as a slim strip beneath them, so
+                // eight rows fit under the section heading on a phone; a full-height
+                // waveform there took more room than it gave. Both layouts follow the
+                // source order, so tabbing follows the screen at any width. The name column
+                // never drops below the longest single word, "Percussion".
                 return (
-                  <article key={stem.id} className={`grid grid-cols-[44px_104px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-[#3b4154] py-3 transition-opacity md:grid-cols-[44px_minmax(110px,180px)_minmax(100px,1fr)_auto_auto] md:gap-x-5 md:gap-y-0 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
+                  <article key={stem.id} className={`grid grid-cols-[40px_minmax(88px,1fr)_auto_minmax(0,1.25fr)] items-center gap-x-2 gap-y-0.5 border-b border-[#3b4154] py-1 transition-opacity md:grid-cols-[44px_minmax(110px,160px)_auto_120px_minmax(0,1fr)] md:gap-x-5 lg:grid-cols-[44px_minmax(110px,160px)_auto_160px_minmax(0,1fr)] md:gap-y-0 md:py-[13px] ${audible ? "opacity-100" : "opacity-45"}`}>
                     <button onClick={failed ? () => void loadStems() : inert ? undefined : toggleStems} aria-disabled={inert} aria-busy={pending || starting} aria-label={failed ? `Retry loading ${stem.name}` : inert ? `${stem.name} still loading` : `${wanted === "stems" ? "Pause" : "Play"} all stems from ${stem.name} row`} className={`relative grid h-9 w-9 place-items-center rounded-full border transition-colors *:pointer-events-none before:absolute before:-inset-[5px] before:content-[''] ${inert ? "cursor-default border-[#3b4154] text-[#6a99ab]" : "border-[#a5bed3] bg-[rgba(42,75,90,.38)] text-[#a5bed3] hover:bg-[#a5bed3] hover:text-[#00060f]"}`}>
                       {pending || starting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : failed ? <RefreshCw className="h-3.5 w-3.5" /> : stemsPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-px h-3.5 w-3.5 fill-current" />}
                     </button>
                     <p className="min-w-0 text-[12.8px] uppercase leading-[1.4] tracking-[0.06em] md:truncate">{stem.name}</p>
+                    <div className="flex items-center gap-2 md:gap-3">
+                      <button onClick={() => setStemSolo((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemSolo[stem.id] ? "active" : ""}`} aria-label={`Solo ${stem.name}`}>S</button>
+                      <button onClick={() => setStemMute((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemMute[stem.id] ? "active" : ""}`} aria-label={`Mute ${stem.name}`}>M</button>
+                    </div>
+                    <input aria-label={`${stem.name} volume`} type="range" min="0" max="1" step="0.01" value={stemVolume[stem.id]} onChange={(event) => setStemVolume((previous) => ({ ...previous, [stem.id]: Number(event.target.value) }))} className="w-full min-w-0 cursor-pointer" />
                     <div
-                      className={`relative h-[38px] min-w-0 cursor-pointer transition-opacity before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-[''] ${pending || failed ? "opacity-40" : ""}`}
+                      className={`relative col-span-4 h-[18px] min-w-0 cursor-pointer transition-opacity before:absolute before:inset-x-0 before:-inset-y-[3px] before:content-[''] md:col-span-1 md:h-[38px] ${pending || failed ? "opacity-40" : ""}`}
                       role="slider"
                       tabIndex={0}
                       aria-label={`${stem.name} playback position`}
@@ -1077,13 +1104,6 @@ export default function Home() {
                         if (event.key === "ArrowRight") seekStems(stemsTime + 5);
                       }}>
                       <WaveBars peaks={trackPeaks.stems[stem.id]} progress={stemProgress} />
-                    </div>
-                    <div className="col-span-3 flex items-center gap-4 md:contents">
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => setStemSolo((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemSolo[stem.id] ? "active" : ""}`} aria-label={`Solo ${stem.name}`}>S</button>
-                        <button onClick={() => setStemMute((previous) => ({ ...previous, [stem.id]: !previous[stem.id] }))} className={`stem-button ${stemMute[stem.id] ? "active" : ""}`} aria-label={`Mute ${stem.name}`}>M</button>
-                      </div>
-                      <input aria-label={`${stem.name} volume`} type="range" min="0" max="1" step="0.01" value={stemVolume[stem.id]} onChange={(event) => setStemVolume((previous) => ({ ...previous, [stem.id]: Number(event.target.value) }))} className="min-w-0 flex-1 cursor-pointer md:w-28 lg:w-32" />
                     </div>
                   </article>
                 );

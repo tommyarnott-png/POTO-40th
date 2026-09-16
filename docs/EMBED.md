@@ -56,6 +56,9 @@ In Webflow, put this in an Embed element where the player should appear. Change
 
 <script>
   (function () {
+    // Lets the player be heard on an iPhone with the silent switch on (see below).
+    if (navigator.audioSession) navigator.audioSession.type = "playback";
+
     // The full origin, scheme included: only messages from the embedded page count.
     var POTO_ORIGIN = "https://poto-40th.tommy-arnott3.workers.dev";
     // Height of anything fixed over the top of this page, such as a sticky
@@ -96,13 +99,23 @@ In Webflow, put this in an Embed element where the player should appear. Change
   cross-origin frame move its parent by no means at all, so in Safari — every
   browser on an iPhone included — the link does nothing unless the parent
   implements the scroll listener. Treat it as required for Safari visitors.
+- **The audio session line is required for iPhones.** Safari puts web audio in
+  iOS's ambient category, which the silent switch mutes completely — the player
+  runs, and nothing is heard. The page asks for the playback category itself,
+  but Safari ignores that request from a cross-origin frame (unless the frame is
+  allowed the microphone), so on this page it has to come from the host. As a
+  music player would, it pauses anything else playing on the phone once the
+  visitor presses play. If adding script is a problem, `allow="autoplay;
+  microphone"` on the iframe lets the page set it instead; the page never asks for
+  the microphone, so no prompt appears.
 - **`allow="autoplay"`** lets the frame start audio. Playback still only begins
   when the visitor presses play, but without it some browsers block Web Audio in
   a cross-origin frame.
-- **The starting height** (3000px) is roughly the page's height in a 340–700px
-  column: measured at 2,943–3,156px. The frame corrects it within a moment of
-  loading, larger or smaller; until then, content past the starting height is
-  hidden rather than scrollable.
+- **The starting height** (3000px) is a little taller than the page in a
+  340–700px column: measured at 2,777–2,903px, and 2,843px at 340px once the stems
+  have loaded. The frame shrinks to fit within a moment of loading. Keep the
+  starting height at or above the content's: until the first height message
+  arrives, anything past it is hidden rather than scrollable.
 - **`loading="lazy"`** defers the frame until it is near the viewport. Remove it
   if the player sits at the top of the page.
 
@@ -117,7 +130,9 @@ In Webflow, put this in an Embed element where the player should appear. Change
 - **Width:** checked in a 340px frame and at 360px, 390px, 700px and 768px, with
   no horizontal scrolling. Narrower than 320px the page holds its 320px minimum
   width and scrolls sideways — only the vertical scrollbar is suppressed, so that
-  still works. Below 768px each stem row takes two lines, keeping its level slider.
+  still works. Below 768px each stem row keeps its controls on one 44px line with
+  the waveform as a slim strip beneath, so all eight rows fit under their heading on
+  a phone.
 - **Links:** the page has one in-page link, "Begin listening", which scrolls to the
   masters section as described above. The host page supplies the logo and
   navigation, so the page has no header or wordmark of its own.

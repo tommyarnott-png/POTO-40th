@@ -4,23 +4,30 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-**Current build state (16 September 2026):** nine passes are done and live on
+**Current build state (16 September 2026):** ten passes are done and live on
 staging: the production team's feedback, hardening, brand alignment, host-page
 embedding, the mix export, the artwork and levels pass, the download gate, the
-Box Five presentation pass (the signup form and the smoke background), and the
-frame pass (in-page scrolling and the scrollbar when embedded, see The frame
-relationship).
+Box Five presentation pass (the signup form and the smoke background), the frame
+pass (in-page scrolling and the scrollbar when embedded, see The frame
+relationship), and the client-review pass: the 1986 master's distortion and level
+(see The 1986 master), a uniform background (see The smoke background), wider stem
+rows with a one-line phone layout, and the iPhone audio session (see Audio on an
+iPhone — applied but not yet confirmed on a device).
 The A/B plays a 104.77s section cut to match the stems. It switches between the two **release
 packshots** — AVIF with a JPEG fallback at 320/640/960, `srcset` and `sizes`
 against a box that runs 122–240px — not the masks it used to show; clicking one
 cuts between the masters in 8ms on an equal-power curve, and a crossfade slider
 beneath blends them on an equal-power law at a master level of 0.78 so the blend
-never clips. The packshots are full-bleed sleeves, so they carry a drawn edge
+never clips. The 1986 side is deliberately 1dB under a loudness match. The
+packshots are full-bleed sleeves, so they carry a drawn edge
 that brightens with the mix rather than the screen blend the cut-out masks used.
 The page follows the official London site — the host page supplies the wordmark
 and navigation — with Jost for all text, the site's palette, heading treatments and button
 styling, and very little small print. Waveforms are mirrored canvas bars, the
-stems on one shared scale. Stem rows are two lines below 768px, and each row
+stems on one shared scale. A stem row reads like a mixer channel — play, name,
+solo, mute, level, waveform — on one line from 768px; below that its controls share
+one 44px line with the waveform as a slim strip beneath, so all eight rows fit
+under their heading on a phone. Each row
 becomes playable as its own stem decodes; stems that decode after play has been
 pressed join the running clock. The eight stems share a **bus trim** before the
 output (see Stem bus trim). Audio plays at 40kHz with staged loading and release
@@ -81,10 +88,15 @@ sample as a 32-bit float, and iOS Safari closes a tab that holds too much. So:
   not move this trigger without re-measuring.
 - **One set at a time.** Starting either transport releases the other set; spare
   masters are released once the stems are ready and the visitor has left the A/B.
-- **Held small.** Everything decodes at `PLAYBACK_SAMPLE_RATE` (40kHz, above the
+- **Held small.** Everything is held at `PLAYBACK_SAMPLE_RATE` (40kHz, above the
   AAC encode's 17.6kHz ceiling), one track at a time; the kick is held as one
   channel (the only genuinely mono stem); each stem's leading and trailing audio
-  below −72dBFS, beyond a 0.5s margin, is not held.
+  below −72dBFS, beyond a 0.5s margin, is not held. The one exception to how it is
+  *decoded* is the 1986 master (see The 1986 master): it decodes at 39,924Hz and is
+  copied into a 40kHz buffer, so for that one decode the two copies coexist — about
+  33.5MB more at that moment, by arithmetic from the code rather than measured. What
+  is held afterwards is the same size as before, and the masters' peak stays well
+  under the stems'.
 - **In time despite the trim.** Trimmed stems start after a delay while the rest
   play from an offset, and engines round a fraction of a frame differently in
   the two, so every stem position is snapped to a whole frame before scheduling.
@@ -106,7 +118,8 @@ The eight stems run through one shared gain before the output,
 it.** Measured: at their 0.86 default the eight stems sum to **+0.51dBFS**, so
 before it existed the stem bus clipped at the hardware on a mix nobody had
 touched, while the two masters — which carry their 0.78 inside `masterLevels()`
-rather than on a bus — peak at −1.97dBFS. 0.794 is 2.01dB down, which puts the
+rather than on a bus — peaked at −1.97dBFS at the time (their levels now are under
+The 1986 master). 0.794 is 2.01dB down, which puts the
 default at −1.4dBFS playing and −1.6dBFS through the export's resample: clear of
 full scale and clear of the export's −1dBFS ceiling.
 
@@ -119,6 +132,59 @@ bug to fix. The stem sum has a 17.4dB crest where the mastered 2026 file has
 14.2dB, so peak-matching and loudness-matching pull opposite ways: the section
 reads 2.9LU below the A/B (−17.1 against −14.2 LUFS). Only limiting would close
 it, and a limiter would move the balance the visitor set.
+
+## The 1986 master
+
+The client heard the 1986 side distort. It was never clipping: through the live
+gain path, no crossfade position reaches 0dBTP in Chrome's or Safari's decode. The
+cause was how its speed was applied, and its level was separately off. Three
+decisions follow, and each looks like something to tidy up. None is.
+
+**It is decoded at 39,924Hz so that it plays at rate 1. Do not "simplify" this back
+to a `playbackRate`.** The 1986 side has to run 1.00191398 fast to stay locked to the
+2026 (see Why the A/B cannot be perfectly aligned). It used to get that from
+`playbackRate`, and browsers resample a buffer source by interpolating between
+neighbouring samples, which moves every read off the sample grid. Measured on a sine
+at this rate, Chrome and Safari left distortion **18dB down at 10kHz** (32dB at
+5kHz, 8.6dB at 15kHz) and took up to 4dB off the top; Firefox was worse. On the 1986
+master itself the error came to −39.9 LUFS under music at −13.9 — audible, and only
+on the 1986 side, because the 2026 plays at exactly 1 and passes through bit-exact.
+Decoding the file at `OLD_MASTER_DECODE_RATE` and holding the samples as 40kHz gives
+the same speed through each engine's own converter instead: **73–93dB down** across
+the band in Chrome, Safari and Firefox. Putting any `playbackRate` other than 1
+back on either master brings the distortion back.
+
+- **A whole number** — `Math.round(40000 / 1.00191398)` — because Firefox truncates a
+  fractional decode rate (it decoded 39,923.59 as 39,923), while all three engines
+  are clean at an integer. The 1986 side therefore runs 1.0019036 fast rather than
+  1.00191398; its offset is worked out afresh from the measured mapping at every
+  start and seek, so the difference only builds while it plays, to 1.1ms across the
+  whole section, inside the 5ms the rhythm section is aligned to.
+- **Both masters start on whole frames.** Safari reads a buffer from a fractional
+  offset by interpolating even at rate 1, which took up to 4dB off the top at 15kHz.
+- **The sample rate stays 40kHz.** A context at any other rate would put exactly this
+  interpolation between the context and every buffer, stems included (see Audio on an
+  iPhone).
+
+**`OLD_MASTER_GAIN_COMPENSATION` is a measurement: the loudness match.** +1.79dB,
+from the two sides' integrated loudness (BS.1770) over the section as it plays,
+−13.92 against −12.13 LUFS at unity. It exists so the A/B compares the two mixes
+rather than two volumes. It was +1.40dB, set by RMS, which counts the 1986 master's
+heavier low end as loudness it does not have; by loudness that left the 1986 side
+0.46LU under the remaster before anyone had chosen to. Re-measure it by loudness if
+either master is replaced.
+
+**`OLD_MASTER_TILT_DB` is a choice, not a measurement: −1dB, by the client's
+request.** The 1986 side plays that much under the match so the remaster lands with
+more impact. It makes the 2026 sound better partly for a reason that has nothing to
+do with the mix, which is what the match exists to prevent, so it is kept as its own
+constant: **set it to 0** to compare the mixes on their own, without touching the
+measured figure.
+
+Measured with both: 1986 alone −15.20 LUFS and −1.70dBTP, 2026 alone −14.20 LUFS and
+−1.90dBTP — the 1986 side 1.0LU under, which is the tilt and nothing else, with
+matching headroom. The loudest crossfade position peaks at −0.60dBTP, and the 8ms
+cut moves monotonically between the two levels with no dip or bump.
 
 ## The mix export
 
@@ -198,6 +264,20 @@ authenticated anything**, and their table privileges are revoked outright. The
 browser never holds a Supabase key or URL, never holds the project ref, and never
 speaks to Supabase; it posts to our own Worker and nothing else.
 
+**Verified, not assumed (16 September 2026).** With both of the project's public keys
+(the legacy anon JWT and the publishable key), reading, counting, inserting, updating
+and deleting were each refused — 401, `42501 permission denied for table signups`.
+GraphQL is not enabled, no view or function references the table, and it is not in
+the realtime publication. What can read and change it is narrower than "the owner"
+but wider than one person: the service key the Worker holds (it bypasses RLS and can
+read, edit, delete and truncate; the Worker's code only inserts), and so anyone who
+can deploy the `poto-40th` Worker; the `postgres` role, through the database
+password; members of the "The Other Songs" Supabase organisation with access to the
+project; the Supabase connector on the Claude account used to build this; and
+Supabase itself. One hazard for later: this schema's default privileges give anon and
+authenticated full rights on any *new* table, so a table added here must have RLS
+enabled or its grants revoked when it is created.
+
 **How the Worker holds its secret.** Three Wrangler secrets, never in the repo and
 never in the bundle: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` and
 `DOWNLOAD_TOKEN_SECRET`. The URL is a secret rather than a `var` so the project
@@ -275,36 +355,55 @@ expect refusals that a browser will never see.
 ## The smoke background
 
 Two fixed layers behind the content in `src/pages/Home.tsx`: the photograph, carrying
-a `brightness(2) contrast(1.16)` filter, and a shaping scrim over it. Not stacked
-background-images on one element, because the filter must reach the photograph and
-not the darkening above it.
+a `brightness(2) contrast(1.16)` filter, and a flat darkening over it
+(`SMOKE_SCRIM`). Not stacked background-images on one element, because the filter
+must reach the photograph and not the darkening above it.
 
 **The filter is not decoration.** `public/images/smoke-bg.jpg` is very dark in its own
 right — mean `rgb(27,30,34)`, nothing in it above 112 of 255, four fifths below 48 —
 so its whole range sits in the bottom sixth of the scale. There is plenty of texture
 inside that range (its spread is as large as its mean); the range simply never rises
-far enough to be seen. An earlier pass then raised a flat wash from .20–.48 to
-.45–.65 to pass contrast checks, which halved what little was left and made the page
-read as flat near-black. Removing the wash alone does not fix it: with no wash at all
-the page only reached a mean luminance of 0.0106 against the image's own 0.0156.
+far enough to be seen without it.
 
-**Measured, worst contrast over every text run on the page:** 5.52:1 at 1280px, 5.30:1
-at 768px, 5.01:1 at 390px, against a 4.5 requirement. Plate mean luminance roughly
-doubled (0.0059 to 0.0118 at 1280px) and its spread rose about fourfold in the flat
-regions.
+**The darkening is uniform: `rgba(0,6,15,.7)` everywhere, plus the site's side
+treatment at exactly 270deg.** An earlier pass shaped it — heavier at the top and
+bottom, lighter through the middle — and inside the host's auto-height frame, where
+`fixed` means the whole document, that read as bands changing strength down the
+page. Any side angle off horizontal drifts down a tall frame in the same way. The
+masters section also carried its own 44% darkening, a band at its edges; it has
+gone. Its 1px rules stay: they are the site's dividers, not banding.
 
-**Check 390px before 1280px.** `cover` crops a narrow viewport into the middle of the
-photograph, which is its brightest part, so a phone is the harder case: the settings
-that measured 4.78:1 at 1280px measured 3.92:1 at 390px and failed. The binding
-constraint throughout is pale blue `#a5bed3` at 13.44px sitting straight on the plate
-("Begin listening"); brightening fails that before it fails anything else. Disabled
-controls are exempt (WCAG 1.4.3 covers inactive components) and measuring them as
-live produces false failures.
+**How contrast must be checked: the brightest glyph-sized patch anywhere text can
+sit — never a few scroll positions.** The photograph does not move with the page, so
+any line of copy can come to rest over any part of it. The check renders the
+backdrop alone (content hidden), averages it over a 13px patch, and takes the
+brightest patch anywhere in the content column, standalone at 360, 390, 768 and
+1440px and down the whole document inside a 340, 390 and 1440px frame; each text
+colour is then judged against that. The previous method sampled the background
+behind each line at a handful of scroll positions, and **it passed a page that was
+failing at 2.8:1** — the shaped overlay, whose contrast depended on where the text
+happened to be on screen.
 
-**The scrim is shaped, not a flat wash**, and the vertical shaping earns its keep
-twice: it holds the very top and bottom near the page's own `#00060f`, so where our
-page meets the host page's background there is no tonal step. Verified in a 340px
-frame — host `rgb(0,6,15)`, our first rows `rgb(1,7,15)`, our last `rgb(5,9,15)`.
+- **Measured at .70:** the worst backdrop is a luminance of 0.042–0.052 standalone
+  (1440px is the worst — the photograph is nearest its own scale there) and 0.050
+  framed. Small pale-blue labels (`#a5bed3`, 12–13.44px) reach at least 5.37:1, white
+  at least 10.3:1, and the section headings' darker gradient stop (`#6a99ab`) 3.33:1.
+  A check of every real line of copy in place, alongside, found no failures at any of
+  the four widths.
+- **That is why `.section-heading` is 24px on a phone, where the official site sets
+  22px.** At 24px the headings count as large text and need 3:1; at 22px they need
+  4.5:1, which their dark stop cannot reach over any smoke that is still visible. Do
+  not set it back to 22px without re-running the check.
+- **The trade, made deliberately:** this much darkening leaves about half the
+  visible texture the shaped version had through the middle of the page. No uniform
+  treatment kept more and passed at every width — dimming the photograph instead of
+  raising the wash traces the same curve. The alternative, if the smoke matters more,
+  is a dark backing behind each block of copy rather than over the whole image.
+- **Disabled controls are exempt** (WCAG 1.4.3 covers inactive components); measuring
+  them as live produces false failures. So does sampling a status line while its
+  text is changing — re-measure once it settles.
+- The top and bottom edges no longer fade to `#00060f`, so where the page meets the
+  host's own background the tone may step; that edge was not re-measured this pass.
 
 ## The frame relationship
 
@@ -318,6 +417,13 @@ the host site or made to depend on a frame — the hero and its "Begin listening
 link in particular stay on this page. Standalone, in-page links scroll the page
 themselves, smoothly, and the page scrolls normally; everything frame-specific is
 behind the `embedded` check in `src/embed.ts` and the `html.embedded` class.
+
+The host's `/stem-mixer` page (phantom-franchise.webflow.io) currently rebuilds our
+intro in its own markup (`stem-intro-section`) directly above the frame, so the
+heading appears twice there with a seam between the two. The duplicate is the
+host's to remove; ours stays, for the reason above. As of this pass that page also
+embeds us without `allow="autoplay"`, and its listener handles only
+`resize-iframe`, without an origin check.
 
 **Host integrations that predate this pass are broken and need re-copying.**
 `docs/EMBED.md` documented the height message as `poto-40th:height`, a type the
@@ -354,6 +460,43 @@ Two decisions here look like mistakes and are not:
   the fallback scrolling the page's own root in an undersized frame either: on the
   root element, `clip` is treated as `hidden`.
 
+## Audio on an iPhone
+
+The client heard nothing at all on a real iPhone, from the A/B or the stems, while
+everything else rendered. The diagnosis, so none of it is undone:
+
+- **Most likely cause: the silent switch.** Safari files a bare `AudioContext` under
+  iOS's ambient audio category, which the ringer switch mutes completely, with no
+  error and no sign of it. **`getContext()` sets `navigator.audioSession.type =
+  "playback"`** before it creates the context, inside the tap — the category a music
+  player uses, which plays through the switch and, as a music player does, pauses
+  other audio once the visitor presses play. Browsers without the API skip it.
+- **Inside a cross-origin frame Safari ignores that setting** unless the frame is
+  allowed the microphone: the setter returns without effect and reads back "auto".
+  So on the host page the host sets it — the one line in the `docs/EMBED.md` snippet
+  — or adds `allow="autoplay; microphone"` to the iframe. Verified in Playwright's
+  WebKit: standalone, the page's own setting takes; framed, it does not; with the
+  host's line, the host page reads "playback". Whether that reaches the frame's
+  audio on iOS itself is not yet confirmed.
+- **The 40kHz sample rate was cleared, and must stay.** WebKit has run contexts at a
+  requested rate, resampling to the hardware's, since 2020 (r267014), and a 40kHz
+  context in WebKit starts, resumes and keeps time exactly as a 48kHz one does,
+  framed or not. Letting the platform choose its rate would cost 20% more decoded
+  memory at 48kHz, or — if the buffers stayed at 40kHz — put browser interpolation
+  between every buffer and the context, the distortion described under The 1986
+  master.
+- **Resuming is already right:** `resume()` is called synchronously in the tap,
+  before any await, for both transports.
+- **Not the cause, in WebKit:** a cross-origin frame without `allow="autoplay"` still
+  plays when the tap is inside it. Keep recommending the attribute anyway.
+
+Everything above is from WebKit on a Mac, which has no silent switch. The checks
+that settle it on a phone: standalone with the switch off, then on (the change
+should make the second play); the host page with the switch on, before and after
+the host adds its line; and, if nothing plays even with the switch off, the iOS
+version, whether the play button spins forever or the stems report "couldn't load",
+and the console through Safari's Web Inspector.
+
 ## Why the A/B cannot be perfectly aligned
 
 The 1986 master and the 2026 remix come from different tape transfers and are
@@ -362,7 +505,8 @@ different mixes. Measured part by part — each 2026 stem against the 1986 maste
 the vocals by up to about 45ms, changing phrase by phrase, and sits the guitar
 about 17ms late.
 
-The player can give the 1986 master only one start offset and one playback rate,
+The player can give the 1986 master only one start offset and one speed — the
+speed applied when it is decoded, not as a playback rate (see The 1986 master) —
 so it can lock one layer at a time. It is locked to the rhythm section: bass and
 percussion sit within about 5ms and the kick within about 13ms, with no drift
 across the section. Switching mid-phrase can still slap on the vocal. No single
