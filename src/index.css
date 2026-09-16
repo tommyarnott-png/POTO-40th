@@ -141,6 +141,26 @@
 }
 
 /*
+ * The Box Five Club signup's own heading treatment, measured from the form itself
+ * on phantomoftheopera.com. Same geometry as this page's own gradient capitals and
+ * the same 70deg angle, but the club's gold stops rather than the site's blue ones,
+ * and at the form's fixed size rather than this page's responsive scale. The solid
+ * colour is the fallback wherever background-clip: text is unavailable.
+ */
+.boxfive-heading {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 19px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #eee0ca;
+  background-image: linear-gradient(70deg, #aa9574, #eee0ca);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/*
  * The level sliders: a 44px-tall hit area around a thin track, and a thumb
  * large enough to find without looking twice.
  */

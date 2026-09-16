@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LoaderCircle, X } from "lucide-react";
-import { CONSENT_CONTROLLER, CONSENT_PRIVACY_URL, CONSENT_TEXT } from "@/consent";
+import { ChevronDown, ExternalLink, LoaderCircle, X } from "lucide-react";
+import { BRAND } from "@/assets";
+import { CONSENT_PRIVACY_LABEL, CONSENT_PRIVACY_URL, CONSENT_TEXT } from "@/consent";
 import type { DownloadKind } from "@/consent";
+import options from "@/data/boxFiveOptions.json";
 
 /** What the form collected, kept for the session so the second download needn't ask again. */
 export type SignupDetails = {
@@ -21,12 +23,42 @@ const EMPTY: SignupDetails = {
   favouriteMusical: "", birthDay: "", birthMonth: "", birthYear: "",
 };
 
-const FIELD =
-  "mt-1.5 block w-full rounded-[5.6px] border border-[#3b4154] bg-[#00060f]/60 px-3 py-2.5 text-[14px] text-white " +
-  "outline-none placeholder:text-[#6a99ab] focus-visible:border-[#a5bed3] focus-visible:ring-1 focus-visible:ring-[#a5bed3]";
-const LABEL = "block text-[12px] uppercase tracking-[0.1em] text-[#a5bed3]";
+type Field = keyof SignupDetails;
+type Problems = Partial<Record<Field | "consent", string>>;
 
-const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])';
+/**
+ * What was typed before the dialog was closed, kept outside the component so it
+ * survives unmounting. Someone who shuts the dialog half way and opens it again
+ * comes back to where they were rather than to an empty form; the one place a
+ * visitor gives anything back is not the place to make them do it twice. Cleared
+ * once a signup goes through.
+ */
+let draft: { details: SignupDetails; step: 0 | 1; consent: boolean } | null = null;
+
+/**
+ * Measured from the Box Five signup on phantomoftheopera.com: a gold-tinted fill, one
+ * gold hairline under it, square, 49px tall on a 10px rhythm.
+ *
+ * The club's two golds. #aa9574 is the dark stop and the resting hairline; #eee0ca is
+ * the light stop, the button and rule colour, and — at a tenth — the fill on every
+ * surface. They are not this page's #6a99ab/#a5bed3: the form carries the club's
+ * identity, and only the gradient angles are shared with the site.
+ */
+const FIELD =
+  "block w-full appearance-none rounded-none border-0 border-b border-[#aa9574] bg-[rgba(238,224,202,0.1)] " +
+  "px-3 py-2 h-[49px] text-[14px] text-white outline-none placeholder:text-white/50 " +
+  // The reference leaves the hairline unchanged on focus, which gives a keyboard user
+  // nothing to follow. Brightening it to the light gold is the smallest departure that
+  // stays inside the club's own palette.
+  "focus:border-[#eee0ca]";
+const LABEL = "flex text-[12px] uppercase leading-[12px] tracking-[0.1em] text-white";
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea,[tabindex]:not([tabindex="-1"])';
+
+const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** The reference offers nothing under eighteen and stops a century back; computed so it does not go stale. */
+const YEARS = Array.from({ length: 101 }, (_, i) => String(new Date().getUTCFullYear() - 18 - i));
 
 /**
  * Posts the details and comes back with an authorisation for the download asked
@@ -70,7 +102,6 @@ function birthdayProblem({ birthDay, birthMonth, birthYear }: SignupDetails) {
   if (built.getUTCFullYear() !== year || built.getUTCMonth() !== month - 1 || built.getUTCDate() !== day) {
     return "That birthday isn't a real date.";
   }
-  if (year < 1900 || year > new Date().getUTCFullYear()) return "Please check the year of your birthday.";
   return null;
 }
 
@@ -87,9 +118,11 @@ export default function SignupModal({
   onClose: () => void;
   onComplete: (details: SignupDetails, token: string) => void;
 }) {
-  const [details, setDetails] = useState<SignupDetails>(EMPTY);
-  const [consent, setConsent] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [details, setDetails] = useState<SignupDetails>(draft?.details ?? EMPTY);
+  const [step, setStep] = useState<0 | 1>(draft?.step ?? 0);
+  const [consent, setConsent] = useState(draft?.consent ?? false);
+  const [problems, setProblems] = useState<Problems>({});
+  const [failure, setFailure] = useState<string | null>(null);
   const [top, setTop] = useState(anchorTop);
   const [submitting, setSubmitting] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -97,23 +130,38 @@ export default function SignupModal({
   /** Where focus came from, so closing puts it back on the control that opened this. */
   const openedFrom = useRef<HTMLElement | null>(null);
 
-  // Kept inside the height the page had before this opened: anchored where the
-  // visitor pressed, but pushed up rather than off the end of the document, so the
-  // height reported to the host frame does not move.
+  draft = { details, step, consent };
+
+  /**
+   * Kept inside the height the page had before this opened, and re-measured
+   * whenever the panel changes size. A wizard is a different height on each step,
+   * and a web font swapping in rewraps the consent wording after first paint, so
+   * one measurement on open is not enough: either would push the document out and
+   * move the height posted to the host frame.
+   */
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
-    setTop(Math.max(8, Math.min(anchorTop, pageHeight - panel.offsetHeight - 8)));
-  }, [anchorTop, pageHeight, problem]);
+    const clamp = () => setTop(Math.max(8, Math.min(anchorTop, pageHeight - panel.offsetHeight - 8)));
+    clamp();
+    const observer = new ResizeObserver(clamp);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [anchorTop, pageHeight]);
 
   useEffect(() => {
     openedFrom.current = document.activeElement as HTMLElement | null;
-    firstFieldRef.current?.focus();
     return () => openedFrom.current?.focus();
   }, []);
 
-  // Escape closes, and Tab is kept inside: a dialog the keyboard can walk out of
-  // leaves a visitor tabbing through a page they cannot see.
+  /** Each step opens on its own first field, so the keyboard lands where the typing starts. */
+  useEffect(() => {
+    firstFieldRef.current?.focus();
+  }, [step]);
+
+  // Escape closes from either step, and Tab is kept inside: a dialog the keyboard
+  // can walk out of leaves a visitor tabbing through a page they cannot see. The
+  // panel is queried afresh each time, so the trap follows the step that is showing.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -137,48 +185,60 @@ export default function SignupModal({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  function set(field: keyof SignupDetails, value: string) {
+  function set(field: Field, value: string) {
     setDetails((previous) => ({ ...previous, [field]: value }));
+    setProblems((previous) => ({ ...previous, [field]: undefined }));
+  }
+
+  function advance() {
+    const found: Problems = {};
+    if (!details.firstName.trim()) found.firstName = "Please give your first name.";
+    if (!details.lastName.trim()) found.lastName = "Please give your last name.";
+    if (!details.email.trim()) found.email = "Please give your email address.";
+    else if (!/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(details.email.trim())) found.email = "That email address doesn't look right.";
+    setProblems(found);
+    if (Object.keys(found).length > 0) return;
+    setStep(1);
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (submitting) return;
 
-    const trimmed = { ...details, firstName: details.firstName.trim(), lastName: details.lastName.trim(), email: details.email.trim() };
-    if (!trimmed.firstName || !trimmed.lastName || !trimmed.email) {
-      setProblem("Please give your first name, last name and email address.");
-      return;
-    }
-    if (!/^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$/.test(trimmed.email)) {
-      setProblem("That email address doesn't look right.");
-      return;
-    }
-    const birthday = birthdayProblem(trimmed);
-    if (birthday) {
-      setProblem(birthday);
-      return;
-    }
+    const found: Problems = {};
+    const birthday = birthdayProblem(details);
+    if (birthday) found.birthDay = birthday;
+    if (!consent) found.consent = "Please tick the box to say we can contact you.";
+    setProblems(found);
+    if (Object.keys(found).length > 0) return;
 
-    setProblem(null);
+    setFailure(null);
     setSubmitting(true);
+    const trimmed = { ...details, firstName: details.firstName.trim(), lastName: details.lastName.trim(), email: details.email.trim() };
     const result = await submitSignup(trimmed, download);
     if ("error" in result) {
-      setProblem(result.error);
+      setFailure(result.error);
       setSubmitting(false);
       return;
     }
+    draft = null;
     onComplete(trimmed, result.token);
   }
 
-  const offer = download === "stem-pack" ? "the stem pack" : "your mix";
+  const [before, after] = CONSENT_TEXT.split(CONSENT_PRIVACY_LABEL);
+
+  const problem = (field: Field | "consent") =>
+    problems[field] ? <span id={`${field}-problem`} className="mt-1 block text-[11px] text-[#e0908a]">{problems[field]}</span> : null;
+  const flag = (field: Field) => ({
+    "aria-invalid": problems[field] ? true : undefined,
+    "aria-describedby": problems[field] ? `${field}-problem` : undefined,
+  });
 
   return (
     // Absolute rather than fixed, and anchored where the visitor pressed. Framed in
     // an auto-height iframe the page never scrolls, so the frame's viewport is the
     // whole document and a fixed dialog would sit in the middle of a page the host
-    // has scrolled away from. Absolute within the existing content also leaves
-    // scrollHeight alone, so the height posted to the parent does not move.
+    // has scrolled away from.
     <div className="absolute inset-0 z-50">
       <div className="absolute inset-0 bg-[#00060f]/85" onClick={onClose} aria-hidden="true" />
       <div
@@ -186,108 +246,165 @@ export default function SignupModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="signup-title"
-        // Capped as well as clamped. The clamp alone trusts one measurement, and a
-        // late reflow — a web font swapping in and rewrapping the consent wording —
-        // grew the panel afterwards and pushed the page out by a few pixels, which
-        // the host frame saw as a height change. Capped, it scrolls inside itself
-        // instead, so top + height can never exceed the page it opened over.
         style={{ top, maxHeight: pageHeight - 16 }}
-        className="absolute left-1/2 w-[min(100%-2rem,480px)] -translate-x-1/2 overflow-y-auto border border-[#3b4154] bg-[#020a15] p-5 shadow-[0_24px_60px_rgba(0,0,0,.6)] sm:p-7">
+        // The reference sheet is not a solid panel: 70% black with a tenth of the light
+        // gold laid over it and the page blurred behind, inside a 1px gold rule at a
+        // 30px radius. Over our own smoke that reads the same way it does over theirs.
+        className="absolute left-1/2 w-[min(100%-1.5rem,860px)] -translate-x-1/2 overflow-y-auto rounded-[30px] border border-[#eee0ca] bg-[rgba(0,0,0,0.7)] bg-[linear-gradient(rgba(238,224,202,0.1),rgba(238,224,202,0.1))] p-6 shadow-[0_24px_60px_rgba(0,0,0,.6)] backdrop-blur-[10px] sm:p-10">
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close and go back"
-          className="absolute right-3 top-3 grid h-9 w-9 place-items-center text-[#a5bed3] hover:text-white">
+          aria-label="Close"
+          className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full border border-[#eee0ca]/40 text-[#eee0ca] hover:border-[#eee0ca] hover:text-white">
           <X className="h-4 w-4" />
         </button>
 
-        <h2 id="signup-title" className="section-heading pr-8">Before you download</h2>
-        <p className="mt-3 text-[14px] leading-[1.7]">
-          Tell us where to find you and {offer} is yours. Fields marked with an asterisk are required; the rest are up to you.
-        </p>
+        <p role="status" className="sr-only">Step {step + 1} of 2</p>
 
-        <form onSubmit={submit} noValidate className="mt-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label>
-              <span className={LABEL}>First name *</span>
-              <input ref={firstFieldRef} required value={details.firstName} onChange={(event) => set("firstName", event.target.value)} autoComplete="given-name" className={FIELD} />
-            </label>
-            <label>
-              <span className={LABEL}>Last name *</span>
-              <input required value={details.lastName} onChange={(event) => set("lastName", event.target.value)} autoComplete="family-name" className={FIELD} />
-            </label>
-          </div>
+        <form onSubmit={submit} noValidate>
+          {step === 0 ? (
+            <div className="grid gap-6 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] sm:gap-8">
+              <div className="flex flex-col items-center text-center sm:border-r sm:border-[#3a342b] sm:pr-10">
+                <img src={BRAND.boxFiveLogo} alt="The Box Five Club" width={1258} height={419} className="h-auto w-[240px]" />
+                <h2 id="signup-title" className="boxfive-heading mt-5">Never miss a moment</h2>
+                {/* Held back on a phone: the visitor pressed a download to get here, so they
+                    already know why they are being asked. The mark and the heading carry the
+                    identity, and the fields are what needs to reach the fold. */}
+                <p className="mt-4 hidden text-[14px] leading-[1.8] sm:block">
+                  Join The Box Five Club for exclusive content, behind-the-scenes access, and the very latest from Phantom of the Opera and the world of Andrew Lloyd Webber Musicals
+                </p>
+                <a
+                  href="https://www.theboxfiveclub.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-[#eee0ca]/50 hover:text-[#eee0ca]">
+                  What is The Box Five Club? <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
 
-          <label className="mt-4 block">
-            <span className={LABEL}>Email address *</span>
-            <input required type="email" value={details.email} onChange={(event) => set("email", event.target.value)} autoComplete="email" className={FIELD} />
-          </label>
-
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label>
-              <span className={LABEL}>Postcode <span className="text-[#6a99ab]">(optional)</span></span>
-              <input value={details.postcode} onChange={(event) => set("postcode", event.target.value)} autoComplete="postal-code" className={FIELD} />
-            </label>
-            <label>
-              <span className={LABEL}>Country or region <span className="text-[#6a99ab]">(optional)</span></span>
-              <input value={details.country} onChange={(event) => set("country", event.target.value)} autoComplete="country-name" className={FIELD} />
-            </label>
-          </div>
-
-          <label className="mt-4 block">
-            <span className={LABEL}>Favourite musical <span className="text-[#6a99ab]">(optional)</span></span>
-            <input value={details.favouriteMusical} onChange={(event) => set("favouriteMusical", event.target.value)} className={FIELD} />
-          </label>
-
-          <fieldset className="mt-4">
-            <legend className={LABEL}>Birthday <span className="text-[#6a99ab]">(optional)</span></legend>
-            <div className="grid grid-cols-3 gap-3">
-              <label>
-                <span className="sr-only">Day of birth</span>
-                <input inputMode="numeric" placeholder="DD" value={details.birthDay} onChange={(event) => set("birthDay", event.target.value)} className={FIELD} />
-              </label>
-              <label>
-                <span className="sr-only">Month of birth</span>
-                <input inputMode="numeric" placeholder="MM" value={details.birthMonth} onChange={(event) => set("birthMonth", event.target.value)} className={FIELD} />
-              </label>
-              <label>
-                <span className="sr-only">Year of birth</span>
-                <input inputMode="numeric" placeholder="YYYY" value={details.birthYear} onChange={(event) => set("birthYear", event.target.value)} className={FIELD} />
-              </label>
+              <div>
+                <label className="block">
+                  <span className={LABEL}>First name</span>
+                  <input ref={firstFieldRef} value={details.firstName} onChange={(event) => set("firstName", event.target.value)}
+                    placeholder="Christine" autoComplete="given-name" className={`${FIELD} mt-2.5`} {...flag("firstName")} />
+                </label>
+                {problem("firstName")}
+                <label className="mt-2.5 block">
+                  <span className={LABEL}>Last name</span>
+                  <input value={details.lastName} onChange={(event) => set("lastName", event.target.value)}
+                    placeholder="Daaé" autoComplete="family-name" className={`${FIELD} mt-2.5`} {...flag("lastName")} />
+                </label>
+                {problem("lastName")}
+                <label className="mt-2.5 block">
+                  <span className={LABEL}>Email address</span>
+                  <input type="email" value={details.email} onChange={(event) => set("email", event.target.value)}
+                    autoComplete="email" className={`${FIELD} mt-2.5`} {...flag("email")} />
+                </label>
+                {problem("email")}
+              </div>
             </div>
-          </fieldset>
+          ) : (
+            <div className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2">
+              <div>
+                <label className="block">
+                  <span className={LABEL}>Postcode<em className="italic opacity-30">(optional)</em></span>
+                  <input ref={firstFieldRef} value={details.postcode} onChange={(event) => set("postcode", event.target.value)}
+                    placeholder="eg SW1Y 4QL" autoComplete="postal-code" className={`${FIELD} mt-2.5`} />
+                </label>
+                <label className="mt-2.5 block">
+                  <span className={LABEL}>Country/region<em className="italic opacity-30">(optional)</em></span>
+                  <span className="relative mt-2.5 block">
+                    <select value={details.country} onChange={(event) => set("country", event.target.value)} className={`${FIELD} pr-9 ${details.country ? "" : "text-white/50"}`}>
+                      <option value="">Select a region</option>
+                      {options.regions.map((region, index) => <option key={`${region}-${index}`} value={region === "-" ? "" : region} disabled={region === "-"}>{region}</option>)}
+                    </select>
+                    <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#aa9574]" />
+                  </span>
+                </label>
+              </div>
 
-          {/* Unticked, and the submit stays disabled until it is: a box already ticked is not consent. */}
-          <label className="mt-6 flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(event) => setConsent(event.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-[#a5bed3]"
-            />
-            <span className="text-[12px] leading-[1.6] text-[#a5bed3]">{CONSENT_TEXT}</span>
-          </label>
+              <div>
+                <label className="block">
+                  <span className={LABEL}>Favourite musical<em className="italic opacity-30">(optional)</em></span>
+                  <span className="relative mt-2.5 block">
+                    <select value={details.favouriteMusical} onChange={(event) => set("favouriteMusical", event.target.value)} className={`${FIELD} pr-9 ${details.favouriteMusical ? "" : "text-white/50"}`}>
+                      <option value="">Select a show</option>
+                      {options.shows.map((show, index) => <option key={`${show}-${index}`} value={show === "-" ? "" : show} disabled={show === "-"}>{show}</option>)}
+                    </select>
+                    <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#aa9574]" />
+                  </span>
+                </label>
 
-          {(CONSENT_CONTROLLER.startsWith("[[") || CONSENT_PRIVACY_URL.startsWith("[[")) && (
-            <p className="mt-3 border border-dashed border-[#c08a4a] bg-[#c08a4a]/10 p-2.5 text-[11px] uppercase tracking-[0.08em] text-[#e0b070]">
-              Not for public release: the data controller and privacy policy link above are placeholders awaiting final wording.
-            </p>
+                <fieldset className="mt-2.5">
+                  <legend className={LABEL}>Birthday<em className="italic opacity-30">(optional)</em></legend>
+                  <div className="mt-2.5 grid grid-cols-3 gap-2">
+                    <span className="relative block">
+                      <select aria-label="Day of birth" {...flag("birthDay")} value={details.birthDay} onChange={(event) => set("birthDay", event.target.value)} className={`${FIELD} pr-7 ${details.birthDay ? "" : "text-white/50"}`}>
+                        <option value="">DD</option>
+                        {DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
+                      </select>
+                    </span>
+                    <span className="relative block">
+                      <select aria-label="Month of birth" {...flag("birthDay")} value={details.birthMonth} onChange={(event) => set("birthMonth", event.target.value)} className={`${FIELD} pr-7 ${details.birthMonth ? "" : "text-white/50"}`}>
+                        <option value="">Month</option>
+                        {MONTHS.map((month, index) => <option key={month} value={String(index + 1).padStart(2, "0")}>{month}</option>)}
+                      </select>
+                    </span>
+                    <span className="relative block">
+                      <select aria-label="Year of birth" {...flag("birthDay")} value={details.birthYear} onChange={(event) => set("birthYear", event.target.value)} className={`${FIELD} pr-7 ${details.birthYear ? "" : "text-white/50"}`}>
+                        <option value="">YYYY</option>
+                        {YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+                      </select>
+                    </span>
+                  </div>
+                  {problem("birthDay")}
+                </fieldset>
+
+                {/* Unticked, and JOIN NOW refuses without it: a box already ticked is not consent. */}
+                <label className="mt-5 flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(event) => { setConsent(event.target.checked); setProblems((previous) => ({ ...previous, consent: undefined })); }}
+                    aria-describedby={problems.consent ? "consent-problem" : undefined}
+                    className="mt-1 h-5 w-5 shrink-0 appearance-none rounded-[2px] border border-[#aa9574] bg-transparent checked:border-[#eee0ca] checked:bg-[#eee0ca] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-[#eee0ca]"
+                  />
+                  <span className="text-[14px] leading-[1.8] text-white">
+                    {before}
+                    <a href={CONSENT_PRIVACY_URL} target="_blank" rel="noreferrer" className="text-[#eee0ca] underline-offset-2 hover:underline">{CONSENT_PRIVACY_LABEL}</a>
+                    {after}
+                  </span>
+                </label>
+                {problem("consent")}
+              </div>
+            </div>
           )}
 
-          <p role="alert" className="mt-4 min-h-[1.2em] text-[12px] text-[#e0908a]">{problem}</p>
+          {failure && <p role="alert" className="mt-4 text-[12px] text-[#e0908a]">{failure}</p>}
 
-          <div className="mt-2 flex flex-col gap-3 sm:flex-row-reverse sm:items-center">
-            <button
-              type="submit"
-              disabled={!consent || submitting}
-              aria-busy={submitting}
-              className="flex items-center justify-center gap-2 rounded-[5.6px] border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] px-[22px] py-[11px] text-[13.44px] uppercase tracking-[0.1em] text-[#00060f] transition-opacity hover:opacity-90 disabled:cursor-default disabled:border-[#3b4154] disabled:bg-none disabled:bg-[rgba(42,75,90,.38)] disabled:text-[#6a99ab]">
-              {submitting && <LoaderCircle className="h-4 w-4 animate-spin" />}
-              {submitting ? "Sending" : "Send and download"}
-            </button>
-            <button type="button" onClick={onClose} className="text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3] hover:text-white">
-              Cancel
-            </button>
+          <div className="mt-7 flex items-center justify-end gap-4">
+            {step === 1 && (
+              <button type="button" onClick={() => setStep(0)} aria-label="Back to your name and email"
+                className="grid h-11 w-11 place-items-center text-[28px] leading-none text-[#eee0ca] hover:text-white">
+                ←
+              </button>
+            )}
+            {step === 0 ? (
+              // Keyed apart from the submit below. Without that React keeps the one
+              // button element and only swaps its type, so the click that advanced
+              // the step was still pending on the same node when it became a submit
+              // button, and the browser submitted the form the press had just built.
+              <button key="next" type="button" onClick={advance}
+                className="border border-[#eee0ca] bg-[rgba(238,224,202,0.1)] px-[42px] py-[11.2px] text-[14px] uppercase tracking-[0.2em] text-[#eee0ca] transition-colors hover:bg-[#eee0ca] hover:text-[#00060f]">
+                Next →
+              </button>
+            ) : (
+              <button key="join" type="submit" disabled={submitting} aria-busy={submitting}
+                className="flex items-center justify-center gap-2 rounded-[5.6px] border border-[#eee0ca] bg-[linear-gradient(72deg,#aa9574,#eee0ca)] px-[42px] py-[11.2px] text-[14px] uppercase tracking-[0.2em] text-[#00060f] transition-opacity hover:opacity-90 disabled:opacity-60">
+                {submitting && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                {submitting ? "Sending" : "Join now"}
+              </button>
+            )}
           </div>
         </form>
       </div>

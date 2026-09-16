@@ -13,6 +13,8 @@ export const BRAND = {
   logo: "/images/phantom-wordmark-white.png",
   logoAvif: "/images/phantom-wordmark-white.avif",
   background: "/images/smoke-bg.jpg",
+  // The Box Five Club's own mark, shown on the signup the capture form is modelled on.
+  boxFiveLogo: "/images/boxfive-logo.svg",
   // Not used by the page: the A/B switches between the release packshots now. Kept with the files for reference.
   maskOriginal: "/images/mask-original.png",
   maskRemaster: "/images/mask-remaster.png",

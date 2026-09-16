@@ -18,14 +18,16 @@ public/audio/source/
 GroupedStems-ForWebsite.zip
 
 # Only the images the page uses are committed: the production wordmark, the
-# release packshots and the page background, plus the A/B masks the packshots
-# replaced, which are kept though nothing renders them. See docs/ASSETS.md.
+# release packshots, the Box Five Club logo and the page background, plus the A/B
+# masks the packshots replaced, which are kept though nothing renders them. See
+# docs/ASSETS.md.
 public/images/*
 !public/images/.gitkeep
 !public/images/phantom-wordmark-white.avif
 !public/images/phantom-wordmark-white.png
 !public/images/packshot-*.avif
 !public/images/packshot-*.jpg
+!public/images/boxfive-logo.svg
 !public/images/mask-original.png
 !public/images/mask-remaster.png
 !public/images/smoke-bg.jpg

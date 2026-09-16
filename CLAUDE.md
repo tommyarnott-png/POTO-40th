@@ -4,16 +4,10 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-> **UNFINISHED — DO NOT SHOW THIS PAGE TO THE PUBLIC YET.** The marketing consent
-> wording in `src/consent.ts` carries two placeholders, `CONSENT_CONTROLLER` and
-> `CONSENT_PRIVACY_URL`. Who controls this data is unresolved and the operator is
-> supplying the final wording. They render on screen exactly as written, and the
-> form shows an amber warning while either is unfilled, so this is visible rather
-> than buried. Do not guess a company name and do not invent a privacy policy URL.
-
-**Current build state (16 September 2026):** seven passes are done and live on
+**Current build state (16 September 2026):** eight passes are done and live on
 staging: the production team's feedback, hardening, brand alignment, host-page
-embedding, the mix export, the artwork and levels pass, and the download gate.
+embedding, the mix export, the artwork and levels pass, the download gate, and the
+Box Five presentation pass (the signup form and the smoke background).
 The A/B plays a 104.77s section cut to match the stems. It switches between the two **release
 packshots** — AVIF with a JPEG fallback at 320/640/960, `srcset` and `sizes`
 against a box that runs 122–240px — not the masks it used to show; clicking one
@@ -51,7 +45,7 @@ Worker script serving `/api/*` and an R2 bucket for the stem pack.
 src/pages/Home.tsx        the whole page: both players, the audio engine, waveforms, crossfade slider, export control
 src/audioLoader.ts        fetches, decodes, holds and releases a set of tracks
 src/mixExport.ts          renders the visitor's stem mix offline and encodes it to MP3
-src/consent.ts            the consent wording, shared by the form and the Worker; holds the placeholders
+src/consent.ts            the consent wording, verbatim from the Box Five signup; shared by the form and the Worker
 src/components/           ErrorBoundary, and SignupModal — the capture form behind both downloads
 worker/index.ts           the Worker: POST /api/signup, GET|HEAD /api/download
 supabase/migrations/      the signups schema, applied to project sbldznxjtqnwibspcydm
@@ -182,6 +176,17 @@ shown, which offer the visitor came for, and a source string. **No IP address is
 stored** — the table has no column for one, and that is deliberate: it is personal
 data whose value here would not justify the obligations.
 
+**Why it looks like someone else's form.** The modal deliberately carries **The Box
+Five Club's identity, not this page's**: its gold (`#aa9574` to `#eee0ca`), its
+translucent sheet, its field treatment, and its copy verbatim — heading, paragraph,
+labels, placeholders and consent sentence. The page around it keeps the official
+site's blue-grey. That mismatch is the point: this capture feeds the production's own
+mailing operation, so it has to look like the form that audience already signs up
+through rather than like a third party asking for their details. Do not "correct" the
+modal to the page palette. The measurements are in `docs/brand-assets-provenance.md`
+under "The Box Five signup", including which of the three signup surfaces across the
+estate this one is — they are not all the same form.
+
 **Where it goes.** One table, `public.signups`, in Supabase project
 `sbldznxjtqnwibspcydm` (eu-west-2), created by the migration in
 `supabase/migrations/`. Row level security is on, **no policy grants anon or
@@ -262,6 +267,40 @@ availability check and the download, so all three leave from the same address;
 verified against the deployed site, three presses in a row, the token accepted
 every time. If you ever test this endpoint with a fresh connection per request,
 expect refusals that a browser will never see.
+
+## The smoke background
+
+Two fixed layers behind the content in `src/pages/Home.tsx`: the photograph, carrying
+a `brightness(2) contrast(1.16)` filter, and a shaping scrim over it. Not stacked
+background-images on one element, because the filter must reach the photograph and
+not the darkening above it.
+
+**The filter is not decoration.** `public/images/smoke-bg.jpg` is very dark in its own
+right — mean `rgb(27,30,34)`, nothing in it above 112 of 255, four fifths below 48 —
+so its whole range sits in the bottom sixth of the scale. There is plenty of texture
+inside that range (its spread is as large as its mean); the range simply never rises
+far enough to be seen. An earlier pass then raised a flat wash from .20–.48 to
+.45–.65 to pass contrast checks, which halved what little was left and made the page
+read as flat near-black. Removing the wash alone does not fix it: with no wash at all
+the page only reached a mean luminance of 0.0106 against the image's own 0.0156.
+
+**Measured, worst contrast over every text run on the page:** 5.52:1 at 1280px, 5.30:1
+at 768px, 5.01:1 at 390px, against a 4.5 requirement. Plate mean luminance roughly
+doubled (0.0059 to 0.0118 at 1280px) and its spread rose about fourfold in the flat
+regions.
+
+**Check 390px before 1280px.** `cover` crops a narrow viewport into the middle of the
+photograph, which is its brightest part, so a phone is the harder case: the settings
+that measured 4.78:1 at 1280px measured 3.92:1 at 390px and failed. The binding
+constraint throughout is pale blue `#a5bed3` at 13.44px sitting straight on the plate
+("Begin listening"); brightening fails that before it fails anything else. Disabled
+controls are exempt (WCAG 1.4.3 covers inactive components) and measuring them as
+live produces false failures.
+
+**The scrim is shaped, not a flat wash**, and the vertical shaping earns its keep
+twice: it holds the very top and bottom near the page's own `#00060f`, so where our
+page meets the host page's background there is no tonal step. Verified in a 340px
+frame — host `rgb(0,6,15)`, our first rows `rgb(1,7,15)`, our last `rgb(5,9,15)`.
 
 ## Why the A/B cannot be perfectly aligned
 

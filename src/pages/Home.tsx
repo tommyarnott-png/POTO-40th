@@ -34,6 +34,40 @@ import SignupModal, { submitSignup } from "@/components/SignupModal";
 import type { SignupDetails } from "@/components/SignupModal";
 import type { DownloadKind } from "@/consent";
 
+/**
+ * The smoke behind the page, in two layers.
+ *
+ * The photograph is very dark in its own right — measured, its mean is rgb(27,30,34),
+ * nothing in it reaches 112 of 255 and four fifths of it sits below 48 — so its whole
+ * range is crushed into the bottom sixth of the scale. It has plenty of texture inside
+ * that range (its spread is as large as its mean); the range simply never rises far
+ * enough to be seen. A flat wash on top then halved what little there was, which is
+ * why the page read as flat near-black. Lifting the wash alone cannot fix that, so the
+ * plate carries a filter that opens the photograph's range out, and the darkening is
+ * shaped rather than poured evenly over it.
+ *
+ * The shaping does two jobs at once. Vertically it keeps the very top and bottom close
+ * to the page's own #00060f, so that where our page meets the host page's background
+ * there is no tonal step; through the middle it lets go, and the smoke carries the
+ * section. Horizontally it holds the outer quarter back, which is the site's own
+ * treatment, but to a translucent blue rather than to solid black as before.
+ *
+ * Measured after the change, over every text run on the page at both widths: worst
+ * contrast 5.52:1 at 1280px and 5.01:1 at 390px, against a 4.5 requirement.
+ *
+ * The binding constraint is pale blue #a5bed3 at 13.44px sitting straight on the plate
+ * ("Begin listening"), and it binds hardest on a phone, not on a desktop: `cover` crops
+ * a 390px viewport into the middle of the photograph, which is its brightest part, so
+ * the same settings that measured 4.78:1 at 1280px measured 3.92:1 at 390px and failed.
+ * Check 390 before 1280 when either number here moves — the desktop reading is the
+ * forgiving one.
+ */
+const SMOKE_FILTER = "brightness(2) contrast(1.16)";
+const SMOKE_SCRIM = [
+  "linear-gradient(260deg, rgba(0,6,15,.78), transparent 25%, transparent 75%, rgba(0,6,15,.78))",
+  "linear-gradient(180deg, rgba(0,6,15,.92) 0%, rgba(0,6,15,.48) 16%, rgba(0,6,15,.4) 52%, rgba(0,6,15,.58) 86%, rgba(0,6,15,.94) 100%)",
+].join(", ");
+
 function formatTime(value: number) {
   const seconds = Number.isFinite(value) ? Math.max(0, value) : 0;
   const minutes = Math.floor(seconds / 60);
@@ -837,8 +871,18 @@ export default function Home() {
   return (
     // The host page supplies the logo and navigation above the page, so it opens with room for them rather than a header of its own.
     // Positioned so the gate can sit absolutely over the page without lengthening it.
-    <div className="relative bg-[#00060f] pt-15 text-white" style={{ backgroundImage: `linear-gradient(260deg, #000, transparent 35%, transparent 65%, #000), linear-gradient(rgba(0,6,15,.45), rgba(0,6,15,.65)), url(${BRAND.background})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
-      <main>
+    <div className="relative bg-[#00060f] pt-15 text-white">
+      {/* Two layers rather than stacked background-images on this div, because the
+          photograph needs a filter that the darkening above it must not share. Fixed,
+          which inside the auto-height frame means the whole document, matching the
+          background-attachment these layers replace. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-0 bg-cover bg-center"
+        style={{ backgroundImage: `url(${BRAND.background})`, filter: SMOKE_FILTER }}
+      />
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0" style={{ backgroundImage: SMOKE_SCRIM }} />
+      <main className="relative z-10">
         <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
           <p className="mb-5 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">The original London production</p>
           <h1 className="section-heading">The Original Cast Recording</h1>
