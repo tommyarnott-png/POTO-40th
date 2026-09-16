@@ -167,9 +167,30 @@ nothing without the listener.
 
 ## What we have seen on the host page
 
-Observed on `phantom-franchise.webflow.io/stem-mixer`, for the host to fix if it
-wishes; both are on the host's side of the frame.
+Observed on `phantom-franchise.webflow.io/stem-mixer` on 16 September 2026. All
+four are on the host's side of the frame. The first two need fixing before launch,
+and the parent-side snippet above covers both; the last two are the host's to fix
+if it wishes.
 
+- **Required for audio on iOS: the iframe has no `allow` attribute, and the page sets
+  no audio session.** With the silent switch on, an iPhone plays nothing: the player
+  runs, and not a sound is heard. Safari files web audio under iOS's ambient
+  category, which the silent switch mutes completely. The page asks for the
+  playback category itself, but Safari ignores that request from a cross-origin
+  frame unless the frame is allowed the microphone. So the host must do one of two
+  things. Either add the snippet's audio session line
+  (`navigator.audioSession.type = "playback"`), or give the iframe
+  `allow="autoplay; microphone"`, which lets the page set the category itself; the
+  page never asks for the microphone, so no prompt appears. `allow="autoplay"` alone
+  is not enough, because it is the microphone permission that lets the frame set
+  the category. Add `allow="autoplay"` in any case, as the snippet does. The
+  diagnosis was made in WebKit on a Mac and has not yet been confirmed on a phone.
+- **The message listener does not check `event.origin`.** It acts on any message
+  whose `type` is `resize-iframe`, whichever window sent it, so any other frame on
+  the page can set the player's height — to 0, hiding it. It also reads
+  `event.data.type` without checking `event.data` exists, so a `null` message from
+  any source throws. The snippet's listener checks the origin against
+  `POTO_ORIGIN` and the shape of the data before acting.
 - **A light rule and a step in tone above the frame.** `.stem-intro-section` has
   `border-bottom: 1px solid #3b4154`, which draws a line along the top edge of the
   frame, and its background finishes a lighter navy than the page below it:
