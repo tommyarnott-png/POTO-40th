@@ -4,7 +4,7 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-**Current build state (16 September 2026):** ten passes are done and live on
+**Current build state (16 September 2026):** eleven passes are done and live on
 staging: the production team's feedback, hardening, brand alignment, host-page
 embedding, the mix export, the artwork and levels pass, the download gate, the
 Box Five presentation pass (the signup form and the smoke background), the frame
@@ -12,7 +12,10 @@ pass (in-page scrolling and the scrollbar when embedded, see The frame
 relationship), and the client-review pass: the 1986 master's distortion and level
 (see The 1986 master), a uniform background (see The smoke background), wider stem
 rows with a one-line phone layout, and the iPhone audio session (see Audio on an
-iPhone — applied but not yet confirmed on a device).
+iPhone — applied but not yet confirmed on a device); and the embed-cleanup pass: the
+hero is hidden when framed, with the A/B heading promoted to `h1` in its place, the
+rules between sections and the stem list's tint are gone, and `docs/EMBED.md` and
+`README.md` were brought up to date (see The frame relationship).
 The A/B plays a 104.77s section cut to match the stems. It switches between the two **release
 packshots** — AVIF with a JPEG fallback at 320/640/960, `srcset` and `sizes`
 against a box that runs 122–240px — not the masks it used to show; clicking one
@@ -32,9 +35,9 @@ becomes playable as its own stem decodes; stems that decode after play has been
 pressed join the running clock. The eight stems share a **bus trim** before the
 output (see Stem bus trim). Audio plays at 40kHz with staged loading and release
 (see Loading and memory). A visitor can **render their mix to an MP3** (see The
-mix export). Inside a frame the page reports its height to the parent, asks the
-parent to do its in-page scrolling, and hides its own vertical scrollbar (see The
-frame relationship); it is kept out of search indexes. Playback audio is AAC
+mix export). Inside a frame the page leaves out its hero, reports its height to the
+parent, and hides its own vertical scrollbar (see The frame
+relationship); it is kept out of search indexes. Playback audio is AAC
 (masters 128 kbps, stems 96 kbps). **Both downloads now sit behind a
 details-capture form** (see The data path): the visitor's own mix, and the
 high-quality stem pack served from R2. The stem archive is now in the bucket
@@ -61,7 +64,7 @@ src/components/           ErrorBoundary, and SignupModal — the capture form be
 worker/index.ts           the Worker: POST /api/signup, GET|HEAD /api/download
 supabase/migrations/      the signups schema, applied to project sbldznxjtqnwibspcydm
 src/assets.ts             asset paths, durations, playback sample rate, stem bus trim, master-alignment constants
-src/embed.ts              whether the page is framed; posts its height and scroll requests to the parent
+src/embed.ts              whether the page is framed; posts its height, and scroll requests for in-page links, to the parent
 src/data/trackPeaks.json  generated waveform envelopes (npm run peaks)
 src/index.css             Tailwind, Jost @font-face, heading treatments, the few custom classes
 public/audio/             playback AAC files, committed
@@ -69,7 +72,7 @@ public/images/, fonts/    wordmark, release packshots, the unused A/B masks, smo
 public/_headers           noindex on every response; robots.txt allows crawling so it is read
 scripts/build-audio.sh    cuts and encodes the source WAVs (sources are not in git)
 tools/                    waveform generator and alignment measurement scripts
-docs/                     ASSETS.md (audio, alignment), EMBED.md (the two frame messages, the host snippet, search engines), brand-assets-provenance.md (official site measurements)
+docs/                     ASSETS.md (audio, alignment), EMBED.md (the two frame messages, the host snippet, what we have seen on the host page, search engines), brand-assets-provenance.md (official site measurements)
 wrangler.jsonc            Cloudflare deployment: the Worker entry, run_worker_first, the R2 and rate-limit bindings
 ```
 
@@ -371,7 +374,10 @@ bottom, lighter through the middle — and inside the host's auto-height frame, 
 `fixed` means the whole document, that read as bands changing strength down the
 page. Any side angle off horizontal drifts down a tall frame in the same way. The
 masters section also carried its own 44% darkening, a band at its edges; it has
-gone. Its 1px rules stay: they are the site's dividers, not banding.
+gone. So have its 1px rules above and below, and the stem list's own tint, taken out
+in the embed-cleanup pass so the page reads as one continuous scroll. The rules
+inside components stay — between stem rows, along the top of the list, above the
+download blocks, and round the A/B card.
 
 **How contrast must be checked: the brightest glyph-sized patch anywhere text can
 sit — never a few scroll positions.** The photograph does not move with the page, so
@@ -403,27 +409,46 @@ happened to be on screen.
   them as live produces false failures. So does sampling a status line while its
   text is changing — re-measure once it settles.
 - The top and bottom edges no longer fade to `#00060f`, so where the page meets the
-  host's own background the tone may step; that edge was not re-measured this pass.
+  host's own background the tone steps. Measured on the host page in the
+  embed-cleanup pass: ΔE 11–16 at the top, from the host introduction's 1px rule and
+  its lighter navy (in `docs/EMBED.md` under "What we have seen on the host page"),
+  and 10–12 at the bottom, where the smoke meets the host's flat background. Inside
+  the page there is no seam: ΔE 0.78 at most. A bottom-edge fade would soften the
+  lower step but is not uniform, so it was offered and not made.
 
 ## The frame relationship
 
 The contract with the host page is in `docs/EMBED.md`; the code is `src/embed.ts`.
-The page posts two messages to its parent, `{ type: "resize-iframe", height }` and
-`{ type: "scroll-iframe", offset }`, and the host implements a listener for each.
+The page has two messages for its parent, `{ type: "resize-iframe", height }` and
+`{ type: "scroll-iframe", offset }`. Framed, it only ever sends the first, since it
+has no in-page links there (see below), so the host needs only the resize listener.
+Keep the scroll message and `bringIntoView`'s framed branch: they are what an in-page
+link added later would use.
 
 **The page must keep working standalone.** The production team may link out to it
 rather than embed it if the embed does not work out, so nothing may be moved onto
-the host site or made to depend on a frame — the hero and its "Begin listening"
-link in particular stay on this page. Standalone, in-page links scroll the page
+the host site or made to depend on a frame. Standalone, in-page links scroll the page
 themselves, smoothly, and the page scrolls normally; everything frame-specific is
 behind the `embedded` check in `src/embed.ts` and the `html.embedded` class.
 
-The host's `/stem-mixer` page (phantom-franchise.webflow.io) currently rebuilds our
-intro in its own markup (`stem-intro-section`) directly above the frame, so the
-heading appears twice there with a seam between the two. The duplicate is the
-host's to remove; ours stays, for the reason above. As of this pass that page also
-embeds us without `allow="autoplay"`, and its listener handles only
-`resize-iframe`, without an origin check.
+**The hero is hidden when framed, not deleted.** The host's `/stem-mixer` page
+(phantom-franchise.webflow.io) supplies its own introduction directly above the
+frame, in its own markup (`stem-intro-section`), so framed the page renders from the
+A/B section down (`{!embedded && …}` in `Home.tsx`) and drops the `pt-15` top
+padding; the host's 80px bottom padding and the A/B section's own top padding make
+the gap. Standalone, the hero and its "Begin listening" link stay exactly as they
+were — do not delete them. The hero carried the page's only `h1`, so framed, "One
+performance. Two mixes." is rendered as the `h1` instead of an `h2`; the two share
+`.section-heading`, so nothing moves. Keep exactly one `h1` in each state if the
+headings change.
+
+The host's own "Begin Listening" is `<a href="#begin">` to the iframe's id, which is
+the right way in: it moves the host page, which is what has to move, with no message
+involved, and so works in Safari. As of the embed-cleanup pass that page embeds us
+without `allow="autoplay"`, and its listener handles only `resize-iframe`, without
+an origin check. Its intro's 1px bottom rule and lighter navy, and its cookie
+banner's scroll lock (the reason a scrollbar appears and disappears there — ours is
+hidden throughout), are written up for the host in `docs/EMBED.md`.
 
 **Host integrations that predate this pass are broken and need re-copying.**
 `docs/EMBED.md` documented the height message as `poto-40th:height`, a type the
@@ -434,11 +459,12 @@ scrollbar. With this pass hiding the page's own vertical scrollbar when framed, 
 now leaves the bottom of the page unreachable, so any existing integration has to
 be re-copied from the current snippet.
 
-**In embedded Safari the scroll listener is required, not optional.** WebKit does
-not let a cross-origin frame move its parent by any means — `scrollIntoView`,
-`focus()` and a fragment change were all tried and none moves it. So without the
-host's scroll listener, "Begin listening" does nothing in Safari, which is every
-browser on an iPhone; it was already a dead link there before this pass. In Chrome,
+**If the framed page ever gains an in-page link, the host's scroll listener becomes
+required in Safari.** WebKit does not let a cross-origin frame move its parent by any
+means — `scrollIntoView`, `focus()` and a fragment change were all tried and none
+moves it. So without the listener such a link does nothing in Safari, which is every
+browser on an iPhone; "Begin listening" was a dead link there when the hero was
+still shown in the frame. `docs/EMBED.md` keeps the listener for that case. In Chrome,
 Edge and Firefox the page falls back on its own: it watches the target with an
 IntersectionObserver, and if the parent has not moved it within 400ms, scrolls
 itself, which reaches the parent as an instant jump. Measured in Playwright's WebKit

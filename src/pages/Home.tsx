@@ -36,7 +36,7 @@ import type { ExportStage } from "@/mixExport";
 import SignupModal, { submitSignup } from "@/components/SignupModal";
 import type { SignupDetails } from "@/components/SignupModal";
 import type { DownloadKind } from "@/consent";
-import { bringIntoView } from "@/embed";
+import { bringIntoView, embedded } from "@/embed";
 
 /**
  * The smoke behind the page, in two layers.
@@ -889,9 +889,10 @@ export default function Home() {
   ] as const;
 
   return (
-    // The host page supplies the logo and navigation above the page, so it opens with room for them rather than a header of its own.
-    // Positioned so the gate can sit absolutely over the page without lengthening it.
-    <div className="relative bg-[#00060f] pt-15 text-white">
+    // Standalone, the page opens with room above the introduction, as it has no header of its own. Framed, the host's own
+    // introduction sits directly above, and its bottom padding with the A/B section's top padding makes the same gap the
+    // introduction leaves standalone. Positioned so the gate can sit absolutely over the page without lengthening it.
+    <div className={`relative bg-[#00060f] text-white ${embedded ? "" : "pt-15"}`}>
       {/* Two layers rather than stacked background-images on this div, because the
           photograph needs a filter that the darkening above it must not share. Fixed,
           which inside the auto-height frame means the whole document, matching the
@@ -903,22 +904,31 @@ export default function Home() {
       />
       <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0" style={{ backgroundImage: SMOKE_SCRIM }} />
       <main className="relative z-10">
-        <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
-          <p className="mb-5 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">The original London production</p>
-          <h1 className="section-heading">The Original Cast Recording</h1>
-          <h2 className="divider-heading mt-3">Like You&apos;ve Never Heard Before</h2>
-          <p className="mt-8 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">
-            Hear The Phantom of the Opera in two ways: compare the original and new masters, then scroll down to explore the new remaster as eight synchronised stems.
-          </p>
-          <a href="#masters" onClick={scrollToTarget} className="mt-10 flex flex-col items-center gap-2 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">
-            Begin listening <ArrowDown className="h-4 w-4" />
-          </a>
-        </section>
+        {/* The host page carries its own copy of this introduction above the frame, so it is left out inside one. */}
+        {!embedded && (
+          <section className="mx-auto flex min-h-[510px] max-w-[1240px] flex-col items-center justify-center px-5 py-20 text-center sm:px-8">
+            <p className="mb-5 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">The original London production</p>
+            <h1 className="section-heading">The Original Cast Recording</h1>
+            <h2 className="divider-heading mt-3">Like You&apos;ve Never Heard Before</h2>
+            <p className="mt-8 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">
+              Hear The Phantom of the Opera in two ways: compare the original and new masters, then scroll down to explore the new remaster as eight synchronised stems.
+            </p>
+            <a href="#masters" onClick={scrollToTarget} className="mt-10 flex flex-col items-center gap-2 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3]">
+              Begin listening <ArrowDown className="h-4 w-4" />
+            </a>
+          </section>
+        )}
 
-        <section id="masters" className="border-y border-[#3b4154] py-20 sm:py-28">
+        {/* No rules between sections, and no section of its own tint: the page reads as one continuous scroll. */}
+        <section id="masters" className="py-20 sm:py-28">
           <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
             <div className="mb-12 max-w-[700px]">
-              <h2 className="section-heading">One performance. Two mixes.</h2>
+              {/* The page's h1 is the introduction's; framed, where that is left out, this heading takes its place. */}
+              {embedded ? (
+                <h1 className="section-heading">One performance. Two mixes.</h1>
+              ) : (
+                <h2 className="section-heading">One performance. Two mixes.</h2>
+              )}
               <p className="mt-5 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play once, then switch between the original master and the new remaster at any moment.</p>
             </div>
 
@@ -1060,7 +1070,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div ref={stemListRef} className="border-t border-[#3b4154] bg-[#00060f]/30">
+            <div ref={stemListRef} className="border-t border-[#3b4154]">
               {STEMS.map((stem) => {
                 const anySolo = Object.values(stemSolo).some(Boolean);
                 const audible = !stemMute[stem.id] && (!anySolo || stemSolo[stem.id]);

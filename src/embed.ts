@@ -16,8 +16,8 @@ const SCROLL_FALLBACK_MS = 400;
 /** Fine enough that any real scroll of a section crosses a step. */
 const EVERY_PERCENT = Array.from({ length: 101 }, (_, i) => i / 100);
 
-/** Whether the page is inside another page's frame, where the host supplies its own navigation. */
-const embedded = window.parent !== window;
+/** Whether the page is inside another page's frame, where the host supplies its own navigation and introduction. */
+export const embedded = window.parent !== window;
 
 if (embedded) {
   // Framed, the parent does the scrolling; see html.embedded in index.css.
