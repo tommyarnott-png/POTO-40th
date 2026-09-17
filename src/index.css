@@ -127,8 +127,14 @@
  * headings count as large text, which they need to, because the darker end of
  * their gradient only reaches 3.3:1 over the brightest smoke (see SMOKE_SCRIM in
  * Home.tsx).
+ *
+ * Every use is centred, and browsers add the tracking after the last letter too,
+ * which moves a centred line left by half the tracking. Shifting the heading right
+ * by that much moves it back without narrowing its lines, so they wrap as before.
  */
 .section-heading {
+  position: relative;
+  left: 0.075em;
   font-size: 24px;
   font-weight: 400;
   line-height: 1;

@@ -104,14 +104,30 @@ In Webflow, put this in an Embed element where the player should appear. Change
 - **`allow="autoplay"`** lets the frame start audio. Playback still only begins
   when the visitor presses play, but without it some browsers block Web Audio in
   a cross-origin frame.
-- **The starting height** (2400px) is a little taller than the page in any frame
-  from 340px to 1440px wide: measured framed at 2,205–2,331px, with the tallest at
-  600px. Only the narrowest frames change as the stems load — 2,247px to 2,265px at
-  340px. The frame is resized to fit within a moment of loading. Keep the starting
-  height at or above the content's, and re-measure if the page's copy or layout
-  changes: until the first height message arrives, anything past it is hidden
-  rather than scrollable. (An earlier version of this document gave 3000px against
-  2,777–2,903px; that was before the page left out its introduction when framed.)
+- **The starting height** (2400px) is a little taller than the page as it loads in
+  any frame from 340px to 1440px wide. Measured framed at every width in that range,
+  the page is 2,187–2,384px tall, shortest at 378–379px and tallest at 650–652px, in
+  Chromium and WebKit alike. The two report the same height at every width except
+  eleven between 784px and 1406px (784, 834, 884, 934, 984, 1017, 1128, 1239, 1240,
+  1293 and 1406px), where the content ends within a sixteenth of a pixel of a half
+  pixel and WebKit reports 1px less. The frame is resized to fit within a moment of
+  loading. Keep the starting height at or above the content's, and re-measure if
+  the page's copy or layout changes: until the first height message arrives,
+  anything past it is hidden rather than scrollable. (Earlier versions of this
+  document gave 2400px against 2,205–2,331px, tallest at 600px, before the
+  17 September layout pass; and 3000px against 2,777–2,903px, before the page left
+  out its introduction when framed.)
+- **The height keeps changing after the first message**, so the listener has to act
+  on every one. Below 640px the page is 30px shorter once the stems have loaded,
+  because the line under the mix download button, "Available once the stems have
+  loaded", goes away. It is 30px taller again whenever they are released, which
+  playing the A/B does, unless a message from a mix download was showing there, in
+  which case the line takes its place. At the narrowest widths the stems' own
+  status line wraps and adds 18px: at 340px while they load (2,240px, then
+  2,258px, then 2,210px once they are ready), and at 340–354px if some fail to
+  load. From 640px up, loading the stems changes nothing. Messages under the two
+  download buttons can add up to 96px more, and take frames 640–652px wide past the
+  starting height, to 2,416px at most.
 - **`loading="lazy"`** defers the frame until it is near the viewport. Remove it
   if the player sits at the top of the page.
 
@@ -152,8 +168,8 @@ nothing without the listener.
   redundant one — appearing whenever the content grew a moment before the parent
   caught up. The height the page reports is unaffected by this; it measured the
   same with and without the rule in Chromium, WebKit and Firefox.
-- **Width:** checked in a 340px frame and at 360px, 390px, 700px and 768px, with
-  no horizontal scrolling. Narrower than 320px the page holds its 320px minimum
+- **Width:** checked in frames of every width from 340px to 1440px, with no
+  horizontal scrolling. Narrower than 320px the page holds its 320px minimum
   width and scrolls sideways — only the vertical scrollbar is suppressed, so that
   still works. Below 768px each stem row keeps its controls on one 44px line with
   the waveform as a slim strip beneath, so all eight rows fit under their heading on
@@ -207,7 +223,8 @@ if it wishes.
   above) — so only one is ever on screen. Where scrollbars take up space (Windows,
   or macOS set to always show them) its arrival also narrows the page by its width:
   in a 390px window, the page and the frame go from 390px to 374px wide, and the
-  frame's content from 2,205px to 2,222px tall, which the resize message follows.
+  frame's content from 2,193px to 2,210px tall as the page first loads, which the
+  resize message follows.
 
 ## Search engines
 

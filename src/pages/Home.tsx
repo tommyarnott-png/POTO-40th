@@ -393,6 +393,9 @@ export default function Home() {
     stemSet.release();
     setStemLoad("idle");
     setStemReady({});
+    // An earlier mix download's result would otherwise stand where the export
+    // control says why it is unavailable until the stems are back.
+    setExportNote(null);
   }
 
   function releaseSpareMasters() {
@@ -922,30 +925,34 @@ export default function Home() {
         {/* No rules between sections, and no section of its own tint: the page reads as one continuous scroll. */}
         <section id="masters" className="py-20 sm:py-28">
           <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
-            <div className="mb-12 max-w-[700px]">
+            <div className="mx-auto mb-12 max-w-[700px] text-center">
               {/* The page's h1 is the introduction's; framed, where that is left out, this heading takes its place. */}
               {embedded ? (
-                <h1 className="section-heading">One performance. Two mixes.</h1>
+                <h1 className="section-heading text-balance">One performance. Two mixes.</h1>
               ) : (
-                <h2 className="section-heading">One performance. Two mixes.</h2>
+                <h2 className="section-heading text-balance">One performance. Two mixes.</h2>
               )}
-              <p className="mt-5 max-w-[620px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play once, then switch between the original master and the new remaster at any moment.</p>
+              <p className="mx-auto mt-5 max-w-[620px] text-balance text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play once, then switch between the&nbsp;original&nbsp;master and the new remaster at any moment.</p>
             </div>
 
             {/* Nothing downloads until a visitor reaches for the comparison. */}
             <div ref={masterCardRef} onPointerEnter={loadMastersOnIntent} onFocus={loadMastersOnIntent} className="border border-[#3b4154] bg-black/30 p-5 shadow-[0_18px_18px_rgba(0,0,0,.3)] sm:p-9">
-              <div className="flex items-center justify-between gap-5 border-b border-[#3b4154] pb-5">
-                <div className="flex min-w-0 items-center gap-4">
-                  {/* The icon swaps to a spinner the moment a pointer arrives and loading starts; icons that
-                      ignore the pointer keep that swap from swallowing the first tap. */}
-                  <button onClick={masterLoad === "failed" ? () => void loadMasters() : toggleMasters} aria-busy={masterLoad === "loading"} aria-label={masterLoad === "failed" ? "Retry loading the master comparison" : wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
-                    {masterLoad === "loading" ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterLoad === "failed" ? <RefreshCw className="h-5 w-5" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
-                  </button>
-                  <div className="min-w-0">
-                    <p className="truncate text-[13.44px] uppercase tracking-[0.1em]">The Phantom of the Opera</p>
-                    {/* Always rendered, so screen readers are already watching it when a load starts or fails. */}
-                    <p role="status" className="text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] not-empty:mt-1">{masterLoad === "loading" ? "Loading" : masterLoad === "failed" ? "Couldn't load" : null}</p>
-                  </div>
+              {/* The recording's name, set as the official site's h3: 19px on a line of the same height. It runs 16.2
+                  times its own size, so beside the play button and the time it would have to shrink below the labels
+                  round it to fit a 340px frame. Below 768px it takes a line of its own above them instead, sized from
+                  the header's width so it stays on one line, and the status moves into the gap between the button and
+                  the time. The status appears the moment a finger lands on the card, so wherever it goes it must not
+                  move the button that finger is pressing. */}
+              <div className="@container grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-4 border-b border-[#3b4154] pb-5 md:gap-x-4">
+                {/* The icon swaps to a spinner the moment a pointer arrives and loading starts; icons that
+                    ignore the pointer keep that swap from swallowing the first tap. */}
+                <button onClick={masterLoad === "failed" ? () => void loadMasters() : toggleMasters} aria-busy={masterLoad === "loading"} aria-label={masterLoad === "failed" ? "Retry loading the master comparison" : wanted === "masters" ? "Pause master comparison" : "Play master comparison"} className="grid h-12 w-12 place-items-center rounded-full border border-[#a5bed3] bg-[linear-gradient(72deg,#6a99ab,#a5bed3)] text-[#00060f] transition-transform *:pointer-events-none active:scale-95">
+                  {masterLoad === "loading" ? <LoaderCircle className="h-5 w-5 animate-spin" /> : masterLoad === "failed" ? <RefreshCw className="h-5 w-5" /> : masterPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
+                </button>
+                <div className="contents md:block">
+                  <p className="order-first col-span-3 truncate text-[length:clamp(13.44px,calc(100cqi/16.5),19px)] leading-none uppercase tracking-[0.1em]">The Phantom of the Opera</p>
+                  {/* Always rendered, so screen readers are already watching it when a load starts or fails. */}
+                  <p role="status" className="text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] md:not-empty:mt-1">{masterLoad === "loading" ? "Loading" : masterLoad === "failed" ? "Couldn't load" : null}</p>
                 </div>
                 <div className="flex items-center gap-3 text-[13.44px] tabular-nums text-[#a5bed3]">
                   <button onClick={() => seekMasters(0)} aria-label="Restart master comparison" className="transition-colors hover:text-white"><RotateCcw className="h-4 w-4" /></button>
@@ -1060,14 +1067,14 @@ export default function Home() {
         <section id="stems" ref={stemsSectionRef} className="relative py-20 sm:py-28">
           <div ref={stemsApproachRef} aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-[200px] h-px" />
           <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
-            <div className="mb-10 flex flex-col justify-between gap-7 sm:flex-row sm:items-end">
-              <div className="max-w-[700px]">
-                <h2 className="section-heading">Inside the new mix.</h2>
-                <p className="mt-5 max-w-[640px] text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play on any row to hear the complete arrangement, then solo, mute or rebalance individual parts.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => { setStemMute(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemSolo(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemVolume(Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86]))); }} className="text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3] hover:text-white">Reset mix</button>
-              </div>
+            <div className="mx-auto mb-8 max-w-[700px] text-center">
+              <h2 className="section-heading text-balance">Inside the new mix.</h2>
+              <p className="mx-auto mt-5 max-w-[620px] text-balance text-[14px] leading-[1.8] min-[480px]:text-[16px]">Press play on any row to hear the complete arrangement, then solo, mute or rebalance individual parts.</p>
+            </div>
+
+            {/* On a line of its own at the head of the list, so the introduction above can centre. */}
+            <div className="mb-3 flex justify-end">
+              <button onClick={() => { setStemMute(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemSolo(Object.fromEntries(STEMS.map((stem) => [stem.id, false]))); setStemVolume(Object.fromEntries(STEMS.map((stem) => [stem.id, 0.86]))); }} className="text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3] hover:text-white">Reset mix</button>
             </div>
 
             <div ref={stemListRef} className="border-t border-[#3b4154]">
@@ -1131,17 +1138,19 @@ export default function Home() {
             </div>
 
             {/* The source material, beside the section that plays it. The mix below is the
-                visitor's own version of the same recording, so each says what it gives
-                rather than leaving two similar buttons to be told apart. */}
-            <div className="mt-6 flex flex-col gap-4 border-t border-[#3b4154] pt-6 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[13.44px] uppercase tracking-[0.1em]">The stems themselves</p>
-                <p role="status" className="mt-1 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3]">
+                visitor's own version of the same recording; the two headings tell them apart.
+                The status line says nothing until there is something to report, and takes no
+                room until then. Stacked on a phone it goes below the button, so a message
+                appearing never moves the button. */}
+            <div className="mt-6 flex flex-col border-t border-[#3b4154] pt-6 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="contents sm:block sm:min-w-0">
+                <p className="mb-3 text-[13.44px] uppercase tracking-[0.1em] sm:mb-0">The stems themselves</p>
+                <p role="status" className="order-last text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] not-empty:mt-3 sm:not-empty:mt-1">
                   {packStage === "sending"
                     ? "Sending your details"
                     : packStage === "fetching"
                       ? "Starting your download"
-                      : packNote ?? "All eight parts, as the studio recorded them"}
+                      : packNote}
                 </p>
               </div>
               <button
@@ -1156,16 +1165,19 @@ export default function Home() {
 
             {/* Beside the faders, since they are what it renders. The status line carries the
                 stage and the bar carries the position, so a screen reader is told the export
-                has started and finished without being read a new percentage every block. */}
-            <div className="mt-6 flex flex-col gap-4 border-t border-[#3b4154] pt-6 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[13.44px] uppercase tracking-[0.1em]">Take your mix with you</p>
-                <p role="status" className="mt-1 text-[12px] uppercase tracking-[0.1em] text-[#a5bed3]">
+                has started and finished without being read a new percentage every block.
+                While the stems are not loaded and no mix download has anything to report, it
+                says why the button is not yet available: while the A/B plays they are not
+                loading, and nothing else on the page says so. */}
+            <div className="mt-6 flex flex-col border-t border-[#3b4154] pt-6 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="contents sm:block sm:min-w-0">
+                <p className="mb-3 text-[13.44px] uppercase tracking-[0.1em] sm:mb-0">Take your mix with you</p>
+                <p role="status" className="order-last text-[12px] uppercase tracking-[0.1em] text-[#a5bed3] not-empty:mt-3 sm:not-empty:mt-1">
                   {exportStage === "rendering"
                     ? "Rendering your mix"
                     : exportStage === "encoding"
                       ? "Encoding your mix"
-                      : exportNote ?? (stemLoad === "ready" ? "Your faders, solos and mutes, as an MP3" : "Ready once every stem has loaded")}
+                      : exportNote ?? (stemLoad === "idle" || stemLoad === "loading" ? "Available once the stems have loaded" : null)}
                 </p>
                 {exportStage && (
                   <div
@@ -1174,7 +1186,7 @@ export default function Home() {
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={Math.round(exportProgress * 100)}
-                    className="mt-3 h-[3px] w-full max-w-[220px] overflow-hidden rounded-full bg-[#3b4154]">
+                    className="order-last mt-3 h-[3px] w-full max-w-[220px] overflow-hidden rounded-full bg-[#3b4154]">
                     <div className="h-full rounded-full bg-[linear-gradient(72deg,#6a99ab,#a5bed3)]" style={{ width: `${exportProgress * 100}%` }} />
                   </div>
                 )}

@@ -4,7 +4,7 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-**Current build state (16 September 2026):** eleven passes are done and live on
+**Current build state (17 September 2026):** twelve passes are done and live on
 staging: the production team's feedback, hardening, brand alignment, host-page
 embedding, the mix export, the artwork and levels pass, the download gate, the
 Box Five presentation pass (the signup form and the smoke background), the frame
@@ -12,10 +12,36 @@ pass (in-page scrolling and the scrollbar when embedded, see The frame
 relationship), and the client-review pass: the 1986 master's distortion and level
 (see The 1986 master), a uniform background (see The smoke background), wider stem
 rows with a one-line phone layout, and the iPhone audio session (see Audio on an
-iPhone — applied but not yet confirmed on a device); and the embed-cleanup pass: the
+iPhone — applied but not yet confirmed on a device); the embed-cleanup pass: the
 hero is hidden when framed, with the A/B heading promoted to `h1` in its place, the
 rules between sections and the stem list's tint are gone, and `docs/EMBED.md` and
-`README.md` were brought up to date (see The frame relationship).
+`README.md` were brought up to date (see The frame relationship); and the
+presentation pass for the production team. In that pass both section introductions
+are centred with balanced lines, the headings across the 700px introduction column
+and the paragraphs on a 620px measure; "Reset mix" sits on its own line above the
+stem list; the A/B title is set as the official site's h3 (19px); the download
+blocks are down to heading and button, apart from the one line below; and the rest
+of the small print was reviewed and kept. The pass settled five things that are
+easy to undo by accident:
+- **The A/B status line must never move the play button.** The masters start
+  loading when a finger lands on the card, so "Loading" appears mid-tap, and a
+  status that pushed the button down made Chromium drop the first tap. Below 768px
+  the title has a line of its own, sized from the header's width (`cqi`) so it never
+  truncates, and the status sits between the button and the time.
+- **On phones, download messages sit below their button** for the same reason.
+- **The only idle line in the download blocks is "Available once the stems have
+  loaded"**, in the mix block: below the button on phones, under the heading beside
+  it from 640px. It shows while the stems are idle or loading, unless an export is
+  running or a mix download has left a message; releasing the stems (playing the A/B
+  does) clears that message so the line comes back. By the client's request, the
+  other idle lines are gone and should stay gone.
+- **Centred section headings are shifted right by half their tracking**
+  (`position: relative`). Padding does the same centring but changes where they wrap.
+- **"the original master" is held together with no-break spaces.** A `nowrap` span
+  overflowed its line in WebKit.
+
+The framed heights in `docs/EMBED.md` were re-measured at every width after this pass.
+
 The A/B plays a 104.77s section cut to match the stems. It switches between the two **release
 packshots** — AVIF with a JPEG fallback at 320/640/960, `srcset` and `sizes`
 against a box that runs 122–240px — not the masks it used to show; clicking one
