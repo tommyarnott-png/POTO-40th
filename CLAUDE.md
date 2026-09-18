@@ -4,11 +4,14 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-**Current build state (17 September 2026):** twelve passes are done and live on
-staging: the production team's feedback, hardening, brand alignment, host-page
-embedding, the mix export, the artwork and levels pass, the download gate, the
-Box Five presentation pass (the signup form and the smoke background), the frame
-pass (in-page scrolling and the scrollbar when embedded, see The frame
+**Current build state (18 September 2026):** twelve passes are done and live on
+staging, and new signups are now forwarded from the database to the production's
+Zapier hook, and on to Dotdigital, by a trigger that leaves the capture path
+untouched (see The data path — Forwarding to Zapier). The passes: the production
+team's feedback, hardening, brand alignment, host-page embedding, the mix export,
+the artwork and levels pass, the download gate, the Box Five presentation pass
+(the signup form and the smoke background), the frame pass (in-page scrolling and
+the scrollbar when embedded, see The frame
 relationship), and the client-review pass: the 1986 master's distortion and level
 (see The 1986 master), a uniform background (see The smoke background), wider stem
 rows with a one-line phone layout, and the iPhone audio session (see Audio on an
@@ -333,6 +336,89 @@ compatibility date past 2025-04-01 a navigation request that misses an asset is
 answered `index.html` with a 200. An `<a href="/api/download">` is a navigation
 request. Remove that rule and the download silently serves the page's HTML
 instead, and a form POST gets a bare 405.
+
+### Forwarding to Zapier, and on to Dotdigital
+
+The production's mailing list runs on Dotdigital, and the host's team wire that up
+in Zapier. Rather than touch the capture path, which works, a database trigger
+sends a copy of each new row to a Zapier catch hook. **Supabase stays the system of
+record**: nothing here reads back, and whatever Dotdigital does with a contact
+changes nothing in the table. Added 17 September 2026 by
+`supabase/migrations/20260917161547_forward_signups_to_zapier.sql`; no application
+code takes part.
+
+**The hook's URL is a secret in Supabase Vault**, named `zapier_signups_webhook_url`,
+and the trigger reads it by that name on each insert. It is in no migration, no
+committed file and no log — checked, after the first sends, against the Postgres
+logs, the edge logs and `pg_stat_statements`. Rotating it is the one risky moment: a
+statement that fails is logged in full, URL and all, so use the recipe at the top of
+the migration, which turns that logging off first. The function refuses any URL that
+is not an HTTPS Zapier catch hook, because pg_net follows redirects and turns a
+redirected POST into a GET without the body — which would look like a success.
+
+**The trigger.** `forward_to_zapier`, AFTER INSERT FOR EACH ROW on `public.signups`,
+runs `public.forward_signup_to_zapier()` (SECURITY DEFINER as `postgres`,
+`search_path = ''`, `lock_timeout = 2s`, EXECUTE revoked from anon and
+authenticated). It posts through **pg_net**, which queues the request inside the
+inserting transaction and sends it after commit: a slow or failing Zapier can never
+slow or fail a signup, and an insert that rolls back sends nothing. Anything that
+goes wrong inside the trigger is caught, so the signup still succeeds; only the
+row's id and the SQLSTATE are logged, because pg_net's own messages quote the URL.
+The payload is flat JSON, named for whoever maps it in Zapier: `signup_id`,
+`signed_up_at` (UTC), `email`, `first_name`, `last_name`, `postcode`,
+`country_or_region`, `favourite_musical`, `date_of_birth`, `marketing_consent`,
+`marketing_consent_text`, `download_requested` (`mix` or `stem-pack`) and
+`signup_source`. Optional fields that were left blank arrive as `null`. The consent
+wording travels in full rather than as a flag and a reference: it is the same short
+sentence for everyone, so it is not personal data, and Dotdigital's consent record
+is built around the wording itself.
+
+**Two columns track the send**, because pg_net keeps its own responses for six hours
+only and that setting needs Supabase Support to change. `forward_request_id` is the
+pg_net request id; `forward_status` is the outcome:
+
+| `forward_status` | Meaning |
+| --- | --- |
+| null | the row predates forwarding — the five rows from 16–17 September, which were never sent |
+| -1 | waiting: inserted, not yet resolved (the column's default) |
+| 0 | nothing came back within 30 minutes: a timeout, a connection error, a send that was never queued, or one lost in a restart |
+| 200–299 | Zapier accepted it |
+| anything else | what Zapier answered |
+
+The job `record-signup-forward-status` (pg_cron, every 15 minutes) copies each
+outcome onto its row while pg_net still holds it, and nudges pg_net's worker, which
+can otherwise sit on a queued request until the next signup. **It only accepts a
+response that arrived within 30 minutes of the signup**: pg_net's tables and their
+id sequence are unlogged, so ids start again from 1 after a crash or a restore, and
+an old id would otherwise match a new response and record a lost send as delivered.
+
+**Which signups did not reach Zapier:**
+
+```sql
+select id, created_at, email, download, forward_status, forward_request_id
+from public.signups
+where forward_status not between 200 and 299
+  and created_at < now() - interval '45 minutes'
+order by created_at;
+```
+
+The grace period covers the send, the 30-minute window and a job run. Rows that
+predate forwarding are left out by their null status. If everything is suddenly
+listed, check the job itself rather than Zapier:
+
+```sql
+select j.active, d.status, d.return_message, d.start_time
+from cron.job j
+left join lateral (select * from cron.job_run_details x where x.jobid = j.jobid order by start_time desc limit 3) d on true
+where j.jobname = 'record-signup-forward-status';
+```
+
+Two limits worth knowing. **A 2xx only means Zapier's hook accepted the request**;
+a Zap that is off, or anything Dotdigital refuses, shows up only in Zap History, so
+the Zap should de-duplicate on `signup_id` — pg_net can re-send a request whose
+batch failed. And **a database restore re-inserts rows, which fires this trigger
+and would send every restored signup to Dotdigital again**: restore with
+`session_replication_role = replica`, or disable the trigger for the restore.
 
 ### Two decisions that look like mistakes and are not
 
