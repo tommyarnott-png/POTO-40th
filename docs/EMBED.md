@@ -63,7 +63,7 @@ In Webflow, put this in an Embed element where the player should appear. Change
   title="The Phantom of the Opera: the original cast recording, masters A/B and stems"
   allow="autoplay"
   loading="lazy"
-  style="display:block;width:100%;height:2400px;border:0"
+  style="display:block;width:100%;height:3550px;border:0"
 ></iframe>
 
 <script>
@@ -104,17 +104,19 @@ In Webflow, put this in an Embed element where the player should appear. Change
 - **`allow="autoplay"`** lets the frame start audio. Playback still only begins
   when the visitor presses play, but without it some browsers block Web Audio in
   a cross-origin frame.
-- **The starting height** (2400px) is a little taller than the page as it loads in
+- **The starting height** (3550px) is a little taller than the page as it loads in
   any frame from 340px to 1440px wide. Measured framed at every width in that range,
-  the page is 2,187–2,384px tall, shortest at 378–379px and tallest at 650–652px, in
+  the page is 3,044–3,504px tall, shortest at 768–769px and tallest at 648–652px, in
   Chromium and WebKit alike. The two report the same height at every width except
-  eleven between 784px and 1406px (784, 834, 884, 934, 984, 1017, 1128, 1239, 1240,
-  1293 and 1406px), where the content ends within a sixteenth of a pixel of a half
-  pixel and WebKit reports 1px less. The frame is resized to fit within a moment of
+  twenty-one between 830px and 1428px (830, 918, 929, 940, 951, 962, 1043, 1046,
+  1118, 1143, 1157, 1168, 1193, 1218, 1229, 1242, 1281, 1317, 1353, 1392 and 1428px),
+  where the content ends within a sixteenth of a pixel of a half pixel and WebKit
+  reports 1px less. The frame is resized to fit within a moment of
   loading. Keep the starting height at or above the content's, and re-measure if
   the page's copy or layout changes: until the first height message arrives,
   anything past it is hidden rather than scrollable. (Earlier versions of this
-  document gave 2400px against 2,205–2,331px, tallest at 600px, before the
+  document gave 2400px against 2,187–2,384px, before the shop section at the foot;
+  2400px against 2,205–2,331px, tallest at 600px, before the
   17 September layout pass; and 3000px against 2,777–2,903px, before the page left
   out its introduction when framed.)
 - **The height keeps changing after the first message**, so the listener has to act
@@ -123,11 +125,18 @@ In Webflow, put this in an Embed element where the player should appear. Change
   loaded", goes away. It is 30px taller again whenever they are released, which
   playing the A/B does, unless a message from a mix download was showing there, in
   which case the line takes its place. At the narrowest widths the stems' own
-  status line wraps and adds 18px: at 340px while they load (2,240px, then
-  2,258px, then 2,210px once they are ready), and at 340–354px if some fail to
-  load. From 640px up, loading the stems changes nothing. Messages under the two
-  download buttons can add up to 96px more, and take frames 640–652px wide past the
-  starting height, to 2,416px at most.
+  status line wraps and adds 18px: at 340px while they load (3,260px, then
+  3,278px, then 3,230px once they are ready), and at 340–354px if some fail to
+  load (3,248px at 340px, 3,232px at 354px). From 640px up, loading the stems changes
+  nothing. Messages under the two download buttons can add up to 96px more, and take
+  frames 640–652px wide past their loading height, to 3,520px at most — the tallest
+  the page gets in any state.
+- **The shop section at the foot never changes the height.** Its three product shots
+  load lazily, each in a box of a size already reserved, and its prices — read from
+  the shop as the page loads — arrive into a line of a fixed height, so a slow
+  answer, or none at all, leaves the page exactly as tall as it was. Measured at
+  340, 390, 640, 650, 768 and 1440px, in every state above, the page reported its
+  own height exactly.
 - **`loading="lazy"`** defers the frame until it is near the viewport. Remove it
   if the player sits at the top of the page.
 
@@ -176,7 +185,11 @@ nothing without the listener.
   a phone.
 - **Links:** framed, the page has no in-page links (see the scroll request above).
   The host page supplies the logo and navigation, so the page has no header or
-  wordmark of its own.
+  wordmark of its own. The only links it does have are the three shop cards at the
+  foot, and each opens the store in a new tab (`target="_blank"`, `rel="noopener
+  noreferrer"`), so none of them ever navigates the host page away. Because of
+  `noreferrer` the store is not told where the visitor came from; if that traffic
+  should be attributable, the links need tracking parameters instead.
 - **Background:** the smoke background is fixed to the viewport, so inside a
   full-height frame — and on iOS, which does not support fixed backgrounds — it
   stretches over the whole page and looks softer.

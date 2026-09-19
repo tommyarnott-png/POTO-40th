@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import {
   ArrowDown,
+  ArrowUpRight,
   Download,
   LoaderCircle,
   Pause,
@@ -37,6 +38,8 @@ import SignupModal, { submitSignup } from "@/components/SignupModal";
 import type { SignupDetails } from "@/components/SignupModal";
 import type { DownloadKind } from "@/consent";
 import { bringIntoView, embedded } from "@/embed";
+import { PRODUCTS, loadProductDetails } from "@/shop";
+import type { ProductDetail } from "@/shop";
 
 /**
  * The smoke behind the page, in two layers.
@@ -115,6 +118,14 @@ const FADE_TRAVEL_PX = 400;
  * and the cap takes over at 648px.
  */
 const ART_SIZES = "(min-width: 648px) 240px, (min-width: 640px) calc((100vw - 168px) / 2), calc((100vw - 96px) / 2)";
+
+/**
+ * The same for a product shot. A card runs it down the side until 768px — 112px
+ * wide, 128px from 480px — and across the top of a column above that: the page is
+ * inset 32px, the three columns are gapped 24px and each card padded 20px, until
+ * the page stops growing at 1240px and the shot at 336px.
+ */
+const SHOT_SIZES = "(min-width: 1240px) 336px, (min-width: 768px) calc((100vw - 112px) / 3 - 40px), (min-width: 480px) 128px, 112px";
 
 type MasterId = "oldMaster" | "newMaster";
 type Transport = "masters" | "stems";
@@ -304,6 +315,9 @@ export default function Home() {
   const [stemMute, setStemMute] = useState<Record<string, boolean>>(() => Object.fromEntries(STEMS.map((stem) => [stem.id, false])));
   const [stemSolo, setStemSolo] = useState<Record<string, boolean>>(() => Object.fromEntries(STEMS.map((stem) => [stem.id, false])));
   const [outputMuted, setOutputMuted] = useState(false);
+
+  /** What the shop says about each release, for those it answered for; see src/shop.ts. */
+  const [productDetails, setProductDetails] = useState<Record<string, ProductDetail>>({});
 
   const [exportStage, setExportStage] = useState<ExportStage | null>(null);
   const [exportProgress, setExportProgress] = useState(0);
@@ -886,6 +900,14 @@ export default function Home() {
     };
   }, []);
 
+  // Asked for once, as the page loads, so the answer is there long before anyone
+  // has scrolled to the foot. A shop that cannot be reached leaves the cards
+  // without prices, which is the same as the moment before an answer arrives, and
+  // is why neither state is announced.
+  useEffect(() => {
+    loadProductDetails().then(setProductDetails, () => {});
+  }, []);
+
   const masters = [
     { id: "oldMaster", art: PACKSHOTS.oldMaster, label: "1986 original" },
     { id: "newMaster", art: PACKSHOTS.newMaster, label: "2026 remaster" },
@@ -1199,6 +1221,78 @@ export default function Home() {
                 {exportStage ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {exportStage === "encoding" ? `Encoding ${Math.round(exportProgress * 100)}%` : "Download your mix"}
               </button>
+            </div>
+          </div>
+        </section>
+
+        {/* The releases themselves, for a visitor who has just spent time with the
+            recording. Prices come from the shop as the page loads and are shown only
+            when they arrive in the currency this page can name (see src/shop.ts). */}
+        <section id="shop" className="py-20 sm:py-28">
+          <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
+            <div className="mx-auto mb-12 max-w-[700px] text-center">
+              <h2 className="section-heading text-balance">Take it home.</h2>
+              <p className="mx-auto mt-5 max-w-[620px] text-balance text-[14px] leading-[1.8] min-[480px]:text-[16px]">The Andrew Lloyd Webber 2026 Mix on vinyl and CD, and the collector&apos;s box set, from the official Andrew Lloyd Webber UK store.</p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3 md:gap-6">
+              {PRODUCTS.map((product) => {
+                const detail = productDetails[product.id];
+                return (
+                  // One link to a card, on the heading, stretched over the whole card by its
+                  // own ::after: making the shot and the call to action links of their own
+                  // would read as three links to the same place. A new tab, because the page
+                  // may be inside the host's frame, where following a link in the top frame
+                  // would take the host's page away with it.
+                  <article key={product.id} className="group relative flex flex-col border border-[#3b4154] bg-black/30 p-4 shadow-[0_18px_18px_rgba(0,0,0,.3)] outline-offset-4 transition-colors hover:border-[#a5bed3] has-[a:focus-visible]:outline has-[a:focus-visible]:outline-1 has-[a:focus-visible]:outline-[#a5bed3] md:p-5">
+                    {/* The shot runs down the side of the name until the cards become columns.
+                        The price below spans the whole card rather than the space beside the
+                        shot, because in a 340px frame that space cannot hold a price and a
+                        label on one line. */}
+                    <div className="flex gap-4 md:flex-col md:gap-5">
+                      <picture className="w-28 shrink-0 min-[480px]:w-32 md:w-full">
+                        <source type="image/avif" srcSet={product.art.avif} sizes={SHOT_SIZES} />
+                        <img
+                          src={product.art.fallback}
+                          srcSet={product.art.jpeg}
+                          sizes={SHOT_SIZES}
+                          alt=""
+                          width={720}
+                          height={720}
+                          loading="lazy"
+                          decoding="async"
+                          className="block aspect-square w-full border border-[#3b4154]"
+                        />
+                      </picture>
+                      <h3 className="min-w-0 text-[12.8px] uppercase leading-[1.4]">
+                        <a href={product.url} target="_blank" rel="noopener noreferrer" className="after:absolute after:inset-0 after:content-['']">
+                          <span className="block tracking-[0.1em] text-[#a5bed3]">{product.format}</span>
+                          <span className="mt-2 block text-balance tracking-[0.06em]">{product.name}</span>
+                          <span className="sr-only"> (opens in a new tab)</span>
+                        </a>
+                      </h3>
+                    </div>
+                    {/* The price keeps its line whether or not there is a price to put in it,
+                        so an answer arriving late — or not at all — cannot change the height
+                        the page reports to the host frame. */}
+                    <div className="mt-auto pt-4">
+                      <p className="flex h-[26px] items-center gap-3 text-[14px] min-[480px]:text-[16px]">
+                        {detail && <span>{detail.price}</span>}
+                        {detail?.soldOut ? (
+                          <span className="whitespace-nowrap border border-[#3b4154] px-2 py-1 text-[12px] uppercase leading-none tracking-[0.1em] text-[#a5bed3]">Sold out</span>
+                        ) : detail?.preorder ? (
+                          <span className="whitespace-nowrap border border-[#3b4154] px-2 py-1 text-[12px] uppercase leading-none tracking-[0.1em] text-[#a5bed3]">Pre-order</span>
+                        ) : null}
+                      </p>
+                      {/* The card's own link says where it goes and that it opens a tab, so
+                          this is the same thing said again to anyone who can see it. */}
+                      <p aria-hidden="true" className="mt-3 flex items-center gap-2 text-[13.44px] uppercase tracking-[0.1em] text-[#a5bed3] transition-colors group-hover:text-white">
+                        Shop now <ArrowUpRight className="h-4 w-4" />
+                      </p>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
         </section>

@@ -44,6 +44,32 @@ export const PACKSHOTS = {
   newMaster: packshot("2026"),
 } as const;
 
+/**
+ * The shop section's product shots, taken from the store's own product images and
+ * served from here rather than its CDN, in the same pair of formats as the
+ * packshots (see src/shop.ts).
+ *
+ * Three widths for two boxes: a card draws its shot 112px wide on a phone and 128px
+ * from 480px, then 179px across at 768px growing to 336px from 1240px up, where the
+ * page stops widening. So 240 covers both phone sizes at 2x, 480 the phone at 3x and
+ * the widest desktop card at 1x, and 720 that card at 2x.
+ */
+const PRODUCT_WIDTHS = [240, 480, 720];
+
+function productShot(release: string) {
+  return {
+    avif: PRODUCT_WIDTHS.map((width) => `/images/product-${release}-${width}.avif ${width}w`).join(", "),
+    jpeg: PRODUCT_WIDTHS.map((width) => `/images/product-${release}-${width}.jpg ${width}w`).join(", "),
+    fallback: `/images/product-${release}-480.jpg`,
+  };
+}
+
+export const PRODUCT_SHOTS = {
+  boxset: productShot("boxset"),
+  vinyl: productShot("3lp"),
+  cd: productShot("2cd"),
+} as const;
+
 /** Compressed playback audio, committed under public/audio. */
 export const PLAYBACK = {
   oldMaster: "/audio/old_master.m4a",

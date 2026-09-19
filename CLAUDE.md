@@ -4,10 +4,14 @@ A static Vite + React + TypeScript + Tailwind v4 page: a masters A/B (1986
 original against the 2026 remaster) and an eight-stem mixer, all playing on one
 Web Audio clock. It is built to be embedded in the official site in an iframe.
 
-**Current build state (18 September 2026):** twelve passes are done and live on
+**Current build state (19 September 2026):** thirteen passes are done and live on
 staging, and new signups are now forwarded from the database to the production's
 Zapier hook, and on to Dotdigital, by a trigger that leaves the capture path
-untouched (see The data path — Forwarding to Zapier). The passes: the production
+untouched (see The data path — Forwarding to Zapier). The thirteenth pass added the
+**shop section** at the foot of the page: the three Phantom 40th physical releases,
+each card a single link out to its product page on the official UK store, with
+prices and pre-order labels read from the store at every visit rather than written
+into the page (see The shop section). The passes: the production
 team's feedback, hardening, brand alignment, host-page embedding, the mix export,
 the artwork and levels pass, the download gate, the Box Five presentation pass
 (the signup form and the smoke background), the frame pass (in-page scrolling and
@@ -43,7 +47,9 @@ easy to undo by accident:
 - **"the original master" is held together with no-break spaces.** A `nowrap` span
   overflowed its line in WebKit.
 
-The framed heights in `docs/EMBED.md` were re-measured at every width after this pass.
+The framed heights in `docs/EMBED.md` were re-measured at every width after that pass,
+and again after the shop section: 3,044–3,504px at load across 340–1440px, 3,520px at
+its tallest in any state, so the snippet's starting height is now 3,550px.
 
 The A/B plays a 104.77s section cut to match the stems. It switches between the two **release
 packshots** — AVIF with a JPEG fallback at 320/640/960, `srcset` and `sizes`
@@ -72,7 +78,9 @@ details-capture form** (see The data path): the visitor's own mix, and the
 high-quality stem pack served from R2. The stem archive is now in the bucket
 (`GroupedStems-ForWebsite.zip`, 220,322,302 bytes, eight 44.1kHz 24-bit WAVs) and
 has been downloaded through the gate end to end, byte-identical to the object,
-standalone and from inside a cross-origin frame. Not built yet: nothing.
+standalone and from inside a cross-origin frame. The page ends with the **shop
+section** (see The shop section): three cards for the physical releases, whose
+prices and pre-order labels come from the store live. Not built yet: nothing.
 
 The A/B masks (`public/images/mask-original.png`, `mask-remaster.png`) are still
 in the repo and still tracked, but nothing renders them: their `BRAND` entries in
@@ -89,6 +97,7 @@ src/pages/Home.tsx        the whole page: both players, the audio engine, wavefo
 src/audioLoader.ts        fetches, decodes, holds and releases a set of tracks
 src/mixExport.ts          renders the visitor's stem mix offline and encodes it to MP3
 src/consent.ts            the consent wording, verbatim from the Box Five signup; shared by the form and the Worker
+src/shop.ts               the three releases the foot of the page sells, and the live read of their prices; the only place a store is named
 src/components/           ErrorBoundary, and SignupModal — the capture form behind both downloads
 worker/index.ts           the Worker: POST /api/signup, GET|HEAD /api/download
 supabase/migrations/      the signups schema, applied to project sbldznxjtqnwibspcydm
@@ -97,7 +106,7 @@ src/embed.ts              whether the page is framed; posts its height, and scro
 src/data/trackPeaks.json  generated waveform envelopes (npm run peaks)
 src/index.css             Tailwind, Jost @font-face, heading treatments, the few custom classes
 public/audio/             playback AAC files, committed
-public/images/, fonts/    wordmark, release packshots, the unused A/B masks, smoke background, self-hosted Jost
+public/images/, fonts/    wordmark, release packshots, the shop's product shots, the unused A/B masks, smoke background, self-hosted Jost
 public/_headers           noindex on every response; robots.txt allows crawling so it is read
 scripts/build-audio.sh    cuts and encodes the source WAVs (sources are not in git)
 tools/                    waveform generator and alignment measurement scripts
@@ -467,6 +476,78 @@ verified against the deployed site, three presses in a row, the token accepted
 every time. If you ever test this endpoint with a fresh connection per request,
 expect refusals that a browser will never see.
 
+## The shop section
+
+Three cards at the foot of the page, one per physical release, each a single link
+out to its product page on `uk.andrewlloydwebber.shop`. The whole card is the click
+target, but there is only ever **one link per card** — it sits on the heading and is
+stretched over the card by its own `::after` — so a screen reader hears one link,
+not three to the same place. Each opens a new tab: framed, a link that navigated the
+top frame would take the host's page away with it.
+
+**Prices, availability and pre-order labels are read from the store at every visit,
+and nothing about them is written into the page.** A price in the production's own
+name that disagreed with the store would be worse than no price at all. This is not
+hypothetical: during the pass that built this, the 3LP dropped from £69.99 to £59.99
+while the work was in progress. The page followed it with no change; the figure in
+the brief that commissioned it was already wrong.
+
+**The read is Shopify's Storefront API, tokenless, pinned to the UK market**
+(`@inContext(country: GB)`), one POST for all three products, on version 2026-07.
+Three reasons, each of which rules out the obvious alternative:
+
+- **Not the Ajax API (`/products/<handle>.js`), though it answers cross-origin.**
+  Shopify documents it as usable only by themes it hosts, and — decisively — it
+  returns a price with **no currency code**. The store sells to 237 countries in 107
+  currencies and Shopify picks one from the visitor's own location, so a visitor in
+  New York can be handed `2100` for the 2CD, which a page assuming pounds would show
+  as "£21.00". `.oembed` and `.json` carry a currency code but are undocumented.
+- **Pinned to GB rather than left to follow the visitor**, so every visitor sees the
+  same pounds and any other currency is a fault rather than a number under the wrong
+  sign. The cost is that a visitor outside the UK may see their own currency when
+  they click through, which is a conversion of the same price, not a contradiction.
+- **Version 2026-07 is supported until 16 July 2027.** An out-of-support version is
+  not an outage — Shopify answers with the oldest it still serves — but move it on.
+
+**Whatever goes wrong, the card simply has no price.** A product that has been
+renamed comes back null; a field the store stops sharing comes back null beside the
+rest (measured: a refused field nulls only itself); a price in another currency, or
+one that does not parse, is dropped. The request is made once as the page loads, and
+a failure is swallowed on purpose. **The price line keeps its height whether or not
+there is a price in it**, which is what lets a late answer, or none, leave the
+reported height untouched (see The frame relationship and `docs/EMBED.md`).
+
+**"Pre-order" follows the store's `preorder` tag**, matched exactly and in
+lowercase; `availableForSale: false` shows "Sold out" instead and takes precedence,
+because what the store's own theme does with a sold-out pre-order is not knowable
+from outside. The tag matches the store's badge on all 53 of its products, but that
+the tag *causes* the badge is an inference: a release-date field, the vendor and the
+publish date all coincide on the same three products. Tags are documented as needing
+an access token and work tokenless today, so if they stop, the labels disappear and
+the prices stay — the harmless direction.
+
+**`src/shop.ts` opens with the store configuration, and it is the only place a store
+is named.** Changing `STORE_ORIGIN` and the three handles in `STORE_HANDLES` moves
+both the links and the live read; the file lists what to check against a new store.
+
+**On the store the brand sites link to.** `phantomoftheopera.com` and
+`andrewlloydwebber.com` point their own "Store" links at
+`store.andrewlloydwebber.com`, which is a different shop from this one. Measured
+there: the box set does not exist (404), and the 3LP and 2CD are `availableForSale:
+false` with no `preorder` tag, so pointing this section at it would show two cards
+reading "Sold out" and one with no price. `us.` (USD) and `eu.` (EUR) carry all
+three at their own prices. This section sells from `uk.` deliberately, and the
+introduction above the cards names that store.
+
+**The product shots are ours, not the store's CDN.** AVIF with a JPEG fallback at
+240/480/720, from the store's own product images, so the section cannot break when
+the store reorganises its assets. `public/images/product-*` needs its `.gitignore`
+exception, as the packshots do.
+
+**One thing the links give up:** `rel="noopener noreferrer"` means the store is not
+told where the visitor came from, so this traffic is not attributable. Tracking
+parameters on the URLs would be the way to get that back.
+
 ## The smoke background
 
 Two fixed layers behind the content in `src/pages/Home.tsx`: the photograph, carrying
@@ -507,7 +588,12 @@ happened to be on screen.
   framed. Small pale-blue labels (`#a5bed3`, 12–13.44px) reach at least 5.37:1, white
   at least 10.3:1, and the section headings' darker gradient stop (`#6a99ab`) 3.33:1.
   A check of every real line of copy in place, alongside, found no failures at any of
-  the four widths.
+  the four widths. Re-run after the shop section, which made the page 850px taller and
+  so stretched the framed backdrop further: 0.0427–0.0523 standalone and 0.0507 framed,
+  giving 5.33:1, 10.26:1 and 3.30:1 — the same picture, and the section's own colours
+  are these three. One trap when re-running it: the smoke is an 882kB background image
+  and the load event does not wait for it to be painted, so a shot taken too early
+  measures the flat base colour and passes everything.
 - **That is why `.section-heading` is 24px on a phone, where the official site sets
   22px.** At 24px the headings count as large text and need 3:1; at 22px they need
   4.5:1, which their dark stop cannot reach over any smoke that is still visible. Do
